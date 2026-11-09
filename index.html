@@ -257,9 +257,9 @@ const today = () => new Date();
 const fmtDate = (d) => d.toLocaleDateString('fr-FR', { day: 'numeric', month: 'long', year: 'numeric' });
 const addDays = (d, n) => { const x = new Date(d); x.setDate(x.getDate() + n); return x; };
 
-const load = () => {
+const load = (brut) => {
   try {
-    const s = JSON.parse(localStorage.getItem(STORE) || 'null');
+    const s = brut !== undefined ? JSON.parse(JSON.stringify(brut)) : JSON.parse(localStorage.getItem(STORE) || 'null');
     if (!s) return DEFAULTS;
     // passage en franchise de TVA (une seule fois) : chaque prix HT × (1 + TVA) pour garder les mêmes totaux,
     // qui deviennent des montants nets à payer.
@@ -830,7 +830,7 @@ function Proposal({ s, c, cTous, numero, onClose, toast, onExclu, onChoix, onDev
   // la signature porte sur le devis : il faut une formule ou un pack choisi
   const signerEnLigne = () => {
     const ch = s.choisi || {};
-    if (!ch.formule && !(ch.packs || []).length) return toast('Choisissez d\'abord une formule ou un pack (« Je choisis… »), puis cliquez sur « Faire signer ».');
+    if (c.mode !== 'formule' && !ch.formule && !(ch.packs || []).length) return toast('Choisissez d\'abord une formule ou un pack (« Je choisis… »), puis cliquez sur « Faire signer ».');
     onDevis(true);
   };
   const cl = s.client, v = s.vendeur;
@@ -1079,8 +1079,9 @@ function Proposal({ s, c, cTous, numero, onClose, toast, onExclu, onChoix, onDev
 // Ce que le client a choisi (une formule, ou un ou plusieurs packs) → lignes, remises, TVA, acompte.
 function devisCalc(s, c) {
   const ch = s.choisi || {};
-  const k = ch.formule ? combos(s, c).find(x => x.id === ch.formule) : null;
-  const ids = k ? k.blocs.map(o => o.id) : (ch.packs || []);
+  const formulePack = c.mode === 'formule' && c.pack; // onglet FORMULES : la formule affichée est le devis
+  const k = !formulePack && ch.formule ? combos(s, c).find(x => x.id === ch.formule) : null;
+  const ids = formulePack ? c.offres.map(o => o.id) : k ? k.blocs.map(o => o.id) : (ch.packs || []);
   const blocs = c.offres.filter(o => ids.includes(o.id));
   if (!blocs.length) return null;
   const t = num(s.tva) / 100;
@@ -1096,7 +1097,7 @@ function devisCalc(s, c) {
   };
   const P = part('ponctuel', kP), M = part('mensuel', kM);
   const acompte = s.acompte.actif ? Math.round(P.ttc * num(s.acompte.pct)) / 100 : 0;
-  const titre = k ? k.nom : blocs.map(o => o.nom).join(' + ');
+  const titre = formulePack ? c.pack.nom : k ? k.nom : blocs.map(o => o.nom).join(' + ');
   return { k, blocs, r, P, M, acompte, titre, mois: c.mois, totalTTC: P.ttc + M.ttc * (c.mois || 1) };
 }
 
@@ -1181,8 +1182,8 @@ function Devis({ s, d, numero, onBack, toast, dateFixe, barre, bandeau, signatur
         <div className="ml-auto flex flex-wrap gap-2">
           <button onClick={faireSigner} className={'rounded-xl px-4 py-2 text-sm font-semibold ' + (envoi ? 'bg-amber-100 text-amber-900' : 'bg-amber-400 text-ink')}>✍ Faire signer</button>
           <button onClick={() => window.print()} className="rounded-xl bg-ink px-4 py-2 text-sm font-semibold text-white">PDF du devis</button>
-          <button onClick={whatsapp} className="rounded-xl bg-[#25D366] px-4 py-2 text-sm font-semibold text-white">WhatsApp</button>
-          <button onClick={email} className="rounded-xl border border-gray-200 px-4 py-2 text-sm font-medium">Email</button>
+          <button onClick={whatsapp} className="rounded-xl border border-[#25D366] px-4 py-2 text-sm font-semibold text-[#128C7E]">Récap WhatsApp</button>
+          <button onClick={email} className="rounded-xl border border-gray-200 px-4 py-2 text-sm font-medium">Récap email</button>
         </div>
         </>}
       </div>
@@ -1346,7 +1347,7 @@ function Devis({ s, d, numero, onBack, toast, dateFixe, barre, bandeau, signatur
 // Le lien contient tout le devis (compressé) : pas de serveur. Le retour contient le devis + la signature.
 const partSnap = (x) => ({ ...x, groupes: x.groupes.map(o => ({ id: o.id, nom: o.nom,
   lignes: o.lignes.map(p => ({ id: p.id, nom: p.nom, court: p.court, description: p.description, qte: p.qte, unite: p.unite, prix: p.prix, type: p.type })) })) });
-const snapDevis = (s, d, numero) => ({ v: 1, numero, date: new Date().toISOString(),
+const snapDevis = (s, d, numero) => ({ v: 1, numero, dossier: DOSSIER_COURANT, date: new Date().toISOString(),
   s: { client: s.client, vendeur: s.vendeur, tva: s.tva, acompte: s.acompte, paiement: s.paiement, validite: s.validite },
   d: { titre: d.titre, mois: d.mois, acompte: d.acompte, totalTTC: d.totalTTC, r: d.r,
     k: d.k ? { nom: d.k.nom, remise: d.k.remise, blocs: d.k.blocs.map(o => ({ id: o.id, nom: o.nom })) } : null,
@@ -1409,13 +1410,31 @@ function PaveSignature({ onSigne, nomDefaut }) {
 }
 
 // Enregistre la signature dans le CRM, si ce navigateur est celui du CRM
-const enregistrerSignature = (numero, sig) => {
+// renvoie l'id du dossier, 'orphelin' (mise de côté, à rattacher), true (ancien CRM) ou false (appareil du client)
+const enregistrerSignature = (snap, sig) => {
   try {
-    const st = JSON.parse(localStorage.getItem(STORE) || 'null');
-    if (!st) return false;
-    st.signes = { ...(st.signes || {}), [numero]: sig };
-    localStorage.setItem(STORE, JSON.stringify(st));
-    return true;
+    if (!lireJSON(IDX) && lireJSON(STORE)) initCRM();
+    const numero = snap.numero, id = trouverDossier(snap);
+    if (id) {
+      const st = lireJSON(DK(id)); if (!st) return false;
+      const deja = (st.signes || {})[numero];
+      if (deja && deja.quand !== sig.quand) return id; // déjà signé : la première signature fait foi
+      st.signes = { ...(st.signes || {}), [numero]: sig };
+      const su = st.suivi || {};
+      if (!deja) st.suivi = { ...su, etape: 'signe', prochaine: { date: '', action: '' },
+        historique: [...(su.historique || []), { date: new Date().toISOString(), type: 'auto', texte: `Devis ${numero} signé par ${sig.nom}` }] };
+      ecrireJSON(DK(id), st); majEntree(id, st);
+      return id;
+    }
+    const idx = lireJSON(IDX);
+    if (idx && idx.dossiers && idx.dossiers.length) {
+      if (!(idx.orphelins || []).some(o => o.numero === numero && o.sig.quand === sig.quand))
+        idx.orphelins = [...(idx.orphelins || []), { numero, client: ((snap.s || {}).client || {}).entreprise || '', sig, recu: new Date().toISOString() }];
+      ecrireJSON(IDX, idx); return 'orphelin';
+    }
+    const st = lireJSON(STORE);
+    if (!idx && st) { st.signes = { ...(st.signes || {}), [numero]: sig }; ecrireJSON(STORE, st); return true; }
+    return false;
   } catch { return false; }
 };
 
@@ -1430,14 +1449,14 @@ function PageSignature({ hash }) {
   const [msg, setMsg] = useState('');
   const [dansCrm, setDansCrm] = useState(false);
   useEffect(() => { empreinteDe(payload).then(setEmpreinte); }, [payload]);
-  const st = useMemo(() => { try { return JSON.parse(localStorage.getItem(STORE) || 'null'); } catch { return null; } }, []);
+  const st = useMemo(() => { const id = snap && trouverDossier(snap); return id ? lireJSON(DK(id)) : lireJSON(STORE); }, []);
   const envoye = st && snap && (st.envois || {})[snap.numero];
-  useEffect(() => { if (retour && sig && snap && empreinte) setDansCrm(enregistrerSignature(snap.numero, { ...sig, empreinte, payload })); }, [empreinte]);
+  useEffect(() => { if (retour && sig && snap && empreinte) setDansCrm(enregistrerSignature(snap, { ...sig, empreinte, payload })); }, [empreinte]);
   if (!snap) return <div className="mx-auto max-w-md p-8 text-center"><p className="font-semibold">Ce lien de devis est incomplet.</p><p className="text-sm text-gray-600">Demandez à votre prestataire de vous le renvoyer.</p></div>;
   FRANCHISE = num(snap.s.tva) === 0;
   const v = snap.s.vendeur || {}, cl = snap.s.client || {};
   const toast = (m) => { setMsg(m); setTimeout(() => setMsg(''), 4500); };
-  const signer = (x) => { const full = { ...x, empreinte }; setSig(full); setDansCrm(enregistrerSignature(snap.numero, { ...full, payload })); window.scrollTo(0, 0); document.getElementById('proposal-overlay').scrollTo(0, 0); };
+  const signer = (x) => { const full = { ...x, empreinte }; setSig(full); setDansCrm(enregistrerSignature(snap, { ...full, payload })); window.scrollTo(0, 0); document.getElementById('proposal-overlay').scrollTo(0, 0); };
   const lienRetour = sig && `${location.origin}${location.pathname}#signe=${payload}.${LZString.compressToEncodedURIComponent(JSON.stringify({ nom: sig.nom, traits: sig.traits, quand: sig.quand }))}`;
   const texteRetour = sig && [`Bonjour${v.nom ? ' ' + v.nom.split(' ')[0] : ''},`, '', `Voici le devis N° ${snap.numero} signé par ${sig.nom}${cl.entreprise ? ' (' + cl.entreprise + ')' : ''} :`, lienRetour].join('\n');
   const btn = 'rounded-xl px-4 py-2 text-sm font-semibold';
@@ -1445,7 +1464,7 @@ function PageSignature({ hash }) {
     <>
       <p className="text-sm font-semibold">{sig ? '✅ Devis signé' : '✍ Devis à signer'} · N° {snap.numero}</p>
       <div className="ml-auto flex flex-wrap gap-2">
-        {dansCrm && <button onClick={() => { location.hash = ''; }} className={btn + ' border border-gray-200'}>← Retour au CRM</button>}
+        {dansCrm && <button onClick={() => { location.hash = typeof dansCrm === 'string' && dansCrm !== 'orphelin' ? '#/c/' + dansCrm : '#/'; }} className={btn + ' border border-gray-200'}>← Retour au CRM</button>}
         {!sig && <button onClick={() => document.getElementById('signature-client').scrollIntoView({ behavior: 'smooth' })} className={btn + ' bg-emerald-600 text-white'}>Signer ↓</button>}
         <button onClick={() => window.print()} className={btn + ' bg-ink text-white'}>PDF</button>
       </div>
@@ -1456,7 +1475,7 @@ function PageSignature({ hash }) {
       {retour ? <>
         <p className="font-semibold text-emerald-900">Devis signé par {sig.nom} {quandTxt(sig.quand)}.</p>
         <p className="text-sm text-gray-700">{envoye ? (envoye.empreinte === empreinte ? '✓ Identique au devis que vous avez envoyé (même empreinte).' : '⚠ Ce devis ne correspond pas à l\'empreinte du devis envoyé : vérifiez-le.') : 'Empreinte du devis : ' + empreinte}
-          {dansCrm ? ' Signature enregistrée dans votre CRM.' : ''} Cliquez sur « PDF » pour l'archiver.</p>
+          {dansCrm === 'orphelin' ? ' Aucun dossier ne correspond : la signature est mise de côté dans « Mes clients », à rattacher.' : dansCrm ? ' Signature enregistrée dans le dossier du client.' : ''} Cliquez sur « PDF » pour l'archiver.</p>
       </> : <>
         <p className="font-semibold text-emerald-900">Merci {sig.nom.split(' ')[0]}, votre devis est signé.</p>
         {dansCrm ? <p className="text-sm text-gray-700">La signature est enregistrée dans le CRM. Vous pouvez rendre la tablette.</p> : <>
@@ -1482,8 +1501,12 @@ function PageSignature({ hash }) {
 function Racine() {
   const [hash, setHash] = useState(location.hash);
   useEffect(() => { const f = () => setHash(location.hash); window.addEventListener('hashchange', f); return () => window.removeEventListener('hashchange', f); }, []);
+  const [crm] = useState(() => (hash.startsWith('#signer=') || hash.startsWith('#signe=') ? null : initCRM()));
   if (hash.startsWith('#signer=') || hash.startsWith('#signe=')) return <PageSignature key={hash} hash={hash} />;
-  return <App />;
+  if (!crm && !lireJSON(IDX)) return <App />; // reprise impossible : l'ancien CRM reste utilisable tel quel
+  const m = hash.match(/^#\/c\/([\w-]+)/);
+  if (m && lireJSON(DK(m[1]))) return <App key={m[1]} dossierId={m[1]} />;
+  return <Accueil />;
 }
 
 /* ============================ Formules ============================ */
@@ -1756,9 +1779,431 @@ function Comparaison({ s, onProposer }) {
 }
 
 /* ============================ Application ============================ */
-function App() {
-  const [s, setS] = useState(load);
+/* ============================ Dossiers clients (CRM de gestion) ============================ */
+// Stockage : un index (liste, modèle de tarifs, coordonnées) + une clé par dossier.
+// L'ancienne clé 'crm-proposition-v1' n'est jamais modifiée ni effacée : c'est la copie de secours de La Boulangerie.
+let DOSSIER_COURANT = null;
+const IDX = 'crm-v2-index';
+const DK = (id) => 'crm-v2-d-' + id;
+const ETAPES = [
+  { id: 'a_contacter', label: 'À contacter', coul: '#64748b' },
+  { id: 'contacte', label: 'Contacté', coul: '#0369a1' },
+  { id: 'rdv', label: 'RDV fixé', coul: '#7c3aed' },
+  { id: 'proposition', label: 'Proposition envoyée', coul: '#b45309' },
+  { id: 'signe', label: 'Devis signé', coul: '#047857' },
+  { id: 'perdu', label: 'Perdu', coul: '#9ca3af' },
+];
+const etapeDe = (id) => ETAPES.find(e => e.id === id) || ETAPES[0];
+const rangEtape = (id) => ETAPES.findIndex(e => e.id === id);
+const lireJSON = (k) => { try { return JSON.parse(localStorage.getItem(k) || 'null'); } catch { return null; } };
+const ecrireJSON = (k, v) => localStorage.setItem(k, JSON.stringify(v)); // peut lever une erreur (mémoire pleine)
+const nouvelId = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+const isoJour = (d = new Date()) => { const x = new Date(d); x.setMinutes(x.getMinutes() - x.getTimezoneOffset()); return x.toISOString().slice(0, 10); };
+const plusJours = (n) => { const d = new Date(); d.setDate(d.getDate() + n); return isoJour(d); };
+const jourCourt = (iso) => iso ? new Date(iso + (iso.length === 10 ? 'T12:00' : '')).toLocaleDateString('fr-FR', { day: 'numeric', month: 'short' }) : '';
+const villeDe = (adr) => { const a = adr || ''; const m = a.match(/\d{5}\s+([^,]+)/); return (m ? m[1] : a.split(',').pop() || '').trim(); };
+const TYPES_ECHANGE = { appel: '📞 Appel', visite: '🚪 Visite', message: '💬 Message', note: '📝 Note', auto: '⚙' };
+
+// Montants du dossier : le devis choisi s'il existe, sinon la sélection en cours
+const montantsDe = (st) => {
+  try {
+    const c = compute(st), d = devisCalc(st, c);
+    return d ? { P: d.P.ttc, M: d.M.ttc, mois: d.mois || 0 } : { P: c.ttcP, M: c.ttcM, mois: c.mois || 0 };
+  } catch { return { P: 0, M: 0, mois: 0 }; }
+};
+const entreeDe = (id, st, prev = {}) => {
+  const cl = st.client || {}, su = st.suivi || {}, m = montantsDe(st);
+  return { ...prev, id, entreprise: cl.entreprise || 'Sans nom', responsable: cl.responsable || '', secteur: cl.secteur || '',
+    ville: villeDe(cl.adresse), telephone: cl.telephone || '', etape: su.etape || 'a_contacter',
+    prochaine: su.prochaine || { date: '', action: '' }, numero: su.numero || '', signe: Object.keys(st.signes || {}).length > 0,
+    montantP: m.P, montantM: m.M, mois: m.mois, chiffre: rangEtape(su.etape || 'a_contacter') >= rangEtape('proposition') || !!((st.choisi || {}).formule || ((st.choisi || {}).packs || []).length || Object.keys(st.envois || {}).length), cree: prev.cree || new Date().toISOString(), maj: new Date().toISOString(), archive: !!prev.archive };
+};
+const majEntree = (id, st) => {
+  const idx = lireJSON(IDX); if (!idx) return;
+  const i = idx.dossiers.findIndex(x => x.id === id);
+  const e = entreeDe(id, st, i >= 0 ? idx.dossiers[i] : {});
+  if (i >= 0) idx.dossiers[i] = e; else idx.dossiers.push(e);
+  ecrireJSON(IDX, idx);
+};
+// Enregistre un dossier ; les coordonnées du vendeur sont communes à tous les dossiers
+const sauverDossier = (id, st) => {
+  const disque = lireJSON(DK(id));
+  if (disque) {
+    const manquantes = Object.keys(disque.signes || {}).filter(k => !(st.signes || {})[k]);
+    if (manquantes.length) st = { ...st, signes: { ...disque.signes, ...st.signes }, suivi: disque.suivi }; // signature reçue ailleurs : on la garde
+    if (JSON.stringify(disque) === JSON.stringify(st)) return st; // rien n'a changé : on ne touche à rien
+  }
+  ecrireJSON(DK(id), st);
+  const idx = lireJSON(IDX); if (!idx) return;
+  idx.vendeur = st.vendeur;
+  const i = idx.dossiers.findIndex(x => x.id === id);
+  const e = entreeDe(id, st, i >= 0 ? idx.dossiers[i] : {});
+  if (i >= 0) idx.dossiers[i] = e; else idx.dossiers.push(e);
+  ecrireJSON(IDX, idx);
+  return st;
+};
+const trouverDossier = (snap) => {
+  const idx = lireJSON(IDX); if (!idx || !snap) return null;
+  const e = (snap.dossier && idx.dossiers.find(x => x.id === snap.dossier && lireJSON(DK(x.id))))
+    || idx.dossiers.find(x => x.numero === snap.numero);
+  return e ? e.id : null;
+};
+// Modèle pour les nouveaux clients : tarifs, packs, formules, remises et conditions (pas la fiche client ni les photos)
+// une remise en euros propre à un devis devient le pourcentage équivalent (arrondi) pour les nouveaux clients
+const remisesModele = (st) => {
+  let c = null; try { c = compute({ ...st, mode: 'carte' }); } catch {}
+  const conv = (r, brut) => (r && r.mode !== '%' ? { mode: '%', valeur: String(brut > 0 ? Math.round(num(r.valeur) / brut * 100) : 0) } : r);
+  return { ponctuel: conv(st.remises.ponctuel, c ? c.brutP : 0), mensuel: conv(st.remises.mensuel, c ? c.brutM : 0) };
+};
+const modeleDe = (st) => JSON.parse(JSON.stringify({
+  prestations: st.prestations, offres: st.offres, packs: st.packs, combos: st.combos, remises: remisesModele(st),
+  tva: st.tva, franchise: st.franchise, arrondi: st.arrondi, engagement: st.engagement, acompte: st.acompte,
+  inclus: st.inclus, paiement: st.paiement, validite: st.validite, presentation: st.presentation || '' }));
+const numeroSuivant = (idx) => `DEV-${new Date().getFullYear()}-${String(idx.compteur || 1).padStart(3, '0')}`;
+const totauxDe = (st) => { const c = compute(st); return [c.htP, c.htM, c.totalTTC, c.acompte].map(x => x.toFixed(2)).join('|'); };
+
+// Première ouverture : l'état actuel (La Boulangerie) devient le dossier n° 1, à l'identique.
+function initCRM() {
+  try {
+    const deja = lireJSON(IDX);
+    if (deja && deja.v === 2) return deja;
+    const idx = { v: 2, dossiers: [], compteur: 1, sauvegarde: null, orphelins: [] };
+    const ancien = lireJSON(STORE);
+    if (ancien) {
+      const s1 = load(); // exactement ce que l'ancien CRM affichait
+      const d = today();
+      const ancienNumero = `DEV-${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, '0')}${String(d.getDate()).padStart(2, '0')}-${(s1.client.entreprise || 'X').replace(/[^A-Za-z]/g, '').slice(0, 3).toUpperCase() || 'X'}`;
+      const signes = Object.keys(s1.signes || {}), envois = Object.keys(s1.envois || {});
+      const numero = signes[signes.length - 1] || envois[envois.length - 1] || ancienNumero;
+      s1.suivi = { etape: signes.length ? 'signe' : envois.length ? 'proposition' : 'rdv', prochaine: { date: signes.length ? '' : isoJour(), action: signes.length ? '' : 'Relancer pour la signature du devis' },
+        historique: [{ date: new Date().toISOString(), type: 'auto', texte: 'Dossier repris de la première version du CRM (données inchangées).' }], numero };
+      const avant = totauxDe(s1);
+      const id = 'boulangerie';
+      ecrireJSON(DK(id), s1);
+      if (totauxDe(load(lireJSON(DK(id)))) !== avant) { localStorage.removeItem(DK(id)); return null; } // contrôle au centime
+      idx.dossiers.push(entreeDe(id, s1));
+      idx.modele = modeleDe(s1); idx.modeleSource = s1.client.entreprise || 'La Boulangerie';
+      idx.vendeur = s1.vendeur; idx.compteur = 2;
+    } else {
+      idx.modele = modeleDe(DEFAULTS); idx.modeleSource = 'tarifs par défaut'; idx.vendeur = DEFAULTS.vendeur;
+    }
+    ecrireJSON(IDX, idx);
+    return idx;
+  } catch { return null; }
+}
+
+function creerDossier(infos) {
+  const idx = lireJSON(IDX);
+  const id = nouvelId();
+  const st = { ...DEFAULTS, ...JSON.parse(JSON.stringify(idx.modele || modeleDe(DEFAULTS))), prefillApplied: true,
+    client: { ...blankClient, entreprise: infos.entreprise.trim(), secteur: infos.secteur || '', telephone: infos.telephone || '', adresse: infos.ville || '', responsable: infos.responsable || '' },
+    reponses: {}, notes: {}, exclus: {}, choisi: {}, envois: {}, signes: {}, optionOuverte: false, mode: 'carte', pack: '',
+    visuels: { logo: '', photos: [], demoUrl: '' }, vendeur: idx.vendeur || DEFAULTS.vendeur,
+    suivi: { etape: infos.etape || 'a_contacter', prochaine: { date: (infos.etape || 'a_contacter') === 'a_contacter' ? isoJour() : plusJours(2), action: infos.etape === 'rdv' ? 'Préparer le rendez-vous' : 'Premier contact' },
+      historique: [{ date: new Date().toISOString(), type: 'auto', texte: `Dossier créé avec les formules de « ${idx.modeleSource || 'votre modèle'} »` }], numero: numeroSuivant(idx) } };
+  idx.compteur = (idx.compteur || 1) + 1;
+  ecrireJSON(DK(id), st);
+  idx.dossiers.push(entreeDe(id, st));
+  ecrireJSON(IDX, idx);
+  return id;
+}
+
+function dupliquerDossier(id) {
+  const src = lireJSON(DK(id)), idx = lireJSON(IDX); if (!src || !idx) return null;
+  const nid = nouvelId();
+  const st = { ...JSON.parse(JSON.stringify(src)), client: { ...src.client, entreprise: (src.client.entreprise || 'Client') + ' (copie)' }, envois: {}, signes: {}, choisi: {},
+    suivi: { etape: 'a_contacter', prochaine: { date: isoJour(), action: 'Premier contact' }, historique: [{ date: new Date().toISOString(), type: 'auto', texte: `Copie du dossier « ${src.client.entreprise || ''} »` }], numero: numeroSuivant(idx) } };
+  idx.compteur = (idx.compteur || 1) + 1;
+  ecrireJSON(DK(nid), st); idx.dossiers.push(entreeDe(nid, st)); ecrireJSON(IDX, idx);
+  return nid;
+}
+
+const tailleStockage = () => { let n = 0; try { for (let i = 0; i < localStorage.length; i++) { const k = localStorage.key(i); n += (k.length + (localStorage.getItem(k) || '').length) * 2; } } catch {} return n; };
+
+// Bandeau de suivi en tête du dossier : étape, prochaine action, historique, statut du devis
+function BandeauDossier({ s, set, toast, numero }) {
+  const su = s.suivi || { etape: 'a_contacter', prochaine: { date: '', action: '' }, historique: [] };
+  const [histo, setHisto] = useState(false);
+  const [type, setType] = useState('visite'), [texte, setTexte] = useState('');
+  const maj = (patch, ligne) => set(p => { const x = p.suivi || su; return { suivi: { ...x, ...patch,
+    historique: ligne ? [...(x.historique || []), { date: new Date().toISOString(), ...ligne }] : (x.historique || []) } }; });
+  const changerEtape = (e) => {
+    if (e === su.etape) return;
+    let motif = '';
+    if (e === 'perdu') { motif = prompt('Motif de la perte ? (prix, pas le moment, concurrent…)'); if (motif === null) return; }
+    maj({ etape: e, ...(e === 'perdu' ? { motif } : {}), ...(e === 'signe' || e === 'perdu' ? { prochaine: { date: '', action: '' } } : {}) },
+      { type: 'auto', texte: `Étape : ${etapeDe(e).label}${motif ? ' · ' + motif : ''}` });
+  };
+  const prochaine = su.prochaine || { date: '', action: '' };
+  const setProchaine = (patch) => maj({ prochaine: { ...prochaine, ...patch } });
+  const noter = () => { if (!texte.trim()) return; maj({}, { type, texte: texte.trim() }); setTexte(''); setHisto(true); toast('Échange noté.'); };
+  const sig = (s.signes || {})[numero], env = (s.envois || {})[numero];
+  const retard = prochaine.date && prochaine.date < isoJour();
+  const fini = su.etape === 'signe' || su.etape === 'perdu';
+  const avenant = () => {
+    if (!confirm(`Le devis ${numero} est signé et reste tel quel.\n\nCréer un nouveau devis (nouveau numéro) pour proposer d'autres prestations à ce client ?`)) return;
+    const idx = lireJSON(IDX); const n = numeroSuivant(idx); idx.compteur = (idx.compteur || 1) + 1; ecrireJSON(IDX, idx);
+    set(p => ({ choisi: {}, suivi: { ...(p.suivi || su), numero: n, prochaine: { date: plusJours(3), action: 'Présenter le nouveau devis' },
+      historique: [...((p.suivi || su).historique || []), { date: new Date().toISOString(), type: 'auto', texte: `Nouveau devis ${n} ouvert (le devis ${numero} reste signé)` }] } }));
+    toast(`Nouveau devis ${n} : modifiez la sélection puis faites-le signer.`);
+  };
+  const modele = () => {
+    if (!confirm(`Utiliser les tarifs, packs et formules de « ${s.client.entreprise || 'ce dossier'} » pour les PROCHAINS nouveaux clients ?\n\nLes dossiers existants ne changent pas.`)) return;
+    const idx = lireJSON(IDX); idx.modele = modeleDe(s); idx.modeleSource = s.client.entreprise || 'un dossier'; ecrireJSON(IDX, idx);
+    toast('Modèle mis à jour pour les prochains clients.');
+  };
+  return (
+    <div className="rounded-2xl border border-gray-200 bg-white p-4 shadow-sm">
+      <div className="-mx-1 flex gap-1.5 overflow-x-auto px-1 pb-1">
+        {ETAPES.map(e => {
+          const on = e.id === su.etape;
+          return <button key={e.id} onClick={() => changerEtape(e.id)} className={'shrink-0 rounded-full px-3 py-1.5 text-[13px] font-semibold transition ' + (on ? 'text-white shadow-sm' : 'bg-gray-100 text-gray-600 hover:bg-gray-200')}
+            style={on ? { background: e.coul } : {}}>{e.label}</button>;
+        })}
+      </div>
+      {su.etape === 'perdu' && su.motif && <p className="mt-1 text-xs text-gray-500">Motif : {su.motif}</p>}
+      {!fini && (
+        <div className="mt-3 flex flex-wrap items-center gap-2">
+          <span className={'text-xs font-bold uppercase tracking-wider ' + (retard ? 'text-red-600' : 'text-gray-500')}>{retard ? '⚠ En retard' : 'Prochaine action'}</span>
+          <input value={prochaine.action} onChange={e => setProchaine({ action: e.target.value })} placeholder="Rappeler, envoyer le devis…" className="min-w-[160px] flex-1 rounded-lg border border-gray-200 px-3 py-1.5 text-sm outline-none focus:border-ink" />
+          <input type="date" value={prochaine.date} onChange={e => setProchaine({ date: e.target.value })} className={'rounded-lg border px-2 py-1.5 text-sm outline-none ' + (retard ? 'border-red-300 text-red-700' : 'border-gray-200')} />
+          <button onClick={() => setProchaine({ date: plusJours(1) })} className="rounded-lg bg-gray-100 px-2.5 py-1.5 text-xs font-medium">Demain</button>
+          <button onClick={() => setProchaine({ date: plusJours(7) })} className="rounded-lg bg-gray-100 px-2.5 py-1.5 text-xs font-medium">+1 sem.</button>
+        </div>
+      )}
+      <div className="mt-3 flex flex-wrap gap-2">
+        <select value={type} onChange={e => setType(e.target.value)} className="rounded-lg border border-gray-200 bg-white px-2 py-1.5 text-sm" aria-label="Type d'échange">
+          {['visite', 'appel', 'message', 'note'].map(k => <option key={k} value={k}>{TYPES_ECHANGE[k]}</option>)}
+        </select>
+        <input value={texte} onChange={e => setTexte(e.target.value)} onKeyDown={e => e.key === 'Enter' && noter()} placeholder="Noter un échange : ce qui s'est dit, RDV le…" className="min-w-[180px] flex-1 rounded-lg border border-gray-200 px-3 py-1.5 text-sm outline-none focus:border-ink" />
+        <button onClick={noter} className="rounded-lg bg-ink px-3 py-1.5 text-sm font-semibold text-white">Noter</button>
+      </div>
+      <div className="mt-3 flex flex-wrap items-center gap-2 text-[13px]">
+        {sig && <button onClick={avenant} className="rounded-full border border-gray-200 px-3 py-1 text-gray-600 hover:bg-gray-50">+ Nouveau devis (avenant)</button>}
+        {sig ? <span className="rounded-full bg-emerald-50 px-3 py-1 font-semibold text-emerald-800">✓ Devis {numero} signé par {sig.nom} le {jourCourt(sig.quand)}</span>
+          : env ? <span className="rounded-full bg-amber-50 px-3 py-1 font-semibold text-amber-800">✍ Lien de signature créé le {jourCourt(env.date)}, en attente</span>
+          : <span className="rounded-full bg-gray-100 px-3 py-1 text-gray-600">Devis N° {numero} · pas encore envoyé</span>}
+        <button onClick={() => setHisto(!histo)} className="ml-auto rounded-lg px-2 py-1 text-sm font-medium text-gray-600 hover:bg-gray-100">Historique ({(su.historique || []).length}) {histo ? '▴' : '▾'}</button>
+      </div>
+      {histo && (
+        <div className="mt-3 border-t border-gray-100 pt-3">
+          <ul className="max-h-60 space-y-1.5 overflow-y-auto text-[13px]">
+            {[...(su.historique || [])].reverse().map((h, i) => (
+              <li key={i} className="flex gap-2"><span className="w-20 shrink-0 text-gray-400">{jourCourt(h.date)}</span><span className={h.type === 'auto' ? 'text-gray-500' : ''}>{TYPES_ECHANGE[h.type] || ''} {h.texte}</span></li>
+            ))}
+          </ul>
+          <button onClick={modele} className="mt-3 text-xs font-medium text-gray-500 underline hover:text-ink">Utiliser les tarifs de ce dossier comme modèle pour les nouveaux clients</button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// Écran d'accueil : la base clients
+function Accueil() {
+  const [idx, setIdx] = useState(() => lireJSON(IDX));
+  const [q, setQ] = useState(''), [filtre, setFiltre] = useState('tous');
+  const [creation, setCreation] = useState(false), [msg, setMsg] = useState('');
+  const [form, setForm] = useState({ entreprise: '', responsable: '', secteur: '', ville: '', telephone: '', etape: 'a_contacter' });
+  const fichier = useRef();
+  const recharger = () => setIdx(lireJSON(IDX));
+  const toast = (m) => { setMsg(m); setTimeout(() => setMsg(''), 4500); };
+  const ecrire = (f) => { const x = lireJSON(IDX); f(x); ecrireJSON(IDX, x); recharger(); };
+  const auj = isoJour();
+  const ds = idx.dossiers;
+  const actifs = ds.filter(d => !d.archive);
+  const enCours = actifs.filter(d => !['signe', 'perdu'].includes(d.etape));
+  const relances = enCours.filter(d => d.prochaine && d.prochaine.date && d.prochaine.date <= auj).sort((a, b) => a.prochaine.date.localeCompare(b.prochaine.date));
+  const signes = actifs.filter(d => d.etape === 'signe');
+  const totalD = (d) => d.montantP + d.montantM * (d.mois || 1);
+  const pipeEnCours = actifs.filter(d => d.etape === 'proposition').reduce((a, d) => a + totalD(d), 0);
+  const liste = (filtre === 'archives' ? ds.filter(d => d.archive) : actifs.filter(d => filtre === 'tous' || d.etape === filtre || (filtre === 'relances' && relances.includes(d))))
+    .filter(d => !q || [d.entreprise, d.responsable, d.secteur, d.ville, d.telephone].join(' ').toLowerCase().includes(q.toLowerCase()))
+    .sort((a, b) => {
+      const fa = ['signe', 'perdu'].includes(a.etape), fb = ['signe', 'perdu'].includes(b.etape);
+      if (fa !== fb) return fa ? 1 : -1;
+      const da = (a.prochaine || {}).date || '9999', db = (b.prochaine || {}).date || '9999';
+      return da.localeCompare(db) || b.maj.localeCompare(a.maj);
+    });
+  const ouvrir = (id) => { location.hash = '#/c/' + id; };
+  const creer = () => {
+    if (!form.entreprise.trim()) return toast('Indiquez au moins le nom du commerce.');
+    try { const id = creerDossier(form); ouvrir(id); } catch { toast('Mémoire de l\'appareil pleine : faites une sauvegarde puis archivez des dossiers.'); }
+  };
+  const archiver = (d) => { ecrire(x => { const e = x.dossiers.find(y => y.id === d.id); e.archive = !e.archive; }); toast(d.archive ? 'Dossier ressorti des archives.' : 'Dossier archivé. Retrouvez-le dans « Archivés ».'); };
+  const supprimer = (d) => {
+    if (d.signe) return alert(`« ${d.entreprise} » a un devis signé : il ne peut pas être supprimé. Archivez-le plutôt.`);
+    if (!confirm(`Supprimer définitivement le dossier « ${d.entreprise} » ?\n\nCette action est irréversible. Pensez à faire une sauvegarde avant.`)) return;
+    localStorage.removeItem(DK(d.id)); ecrire(x => { x.dossiers = x.dossiers.filter(y => y.id !== d.id); }); toast('Dossier supprimé.');
+  };
+  const dupliquer = (d) => { const id = dupliquerDossier(d.id); if (id) ouvrir(id); };
+  const sauvegarder = () => {
+    const x = lireJSON(IDX), dossiers = {};
+    x.dossiers.forEach(d => { dossiers[d.id] = lireJSON(DK(d.id)); });
+    const blob = new Blob([JSON.stringify({ format: 'crm-proposition', v: 2, exporte: new Date().toISOString(), index: x, dossiers })], { type: 'application/json' });
+    const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = `crm-sauvegarde-${isoJour()}.json`; a.click();
+    setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+    ecrire(y => { y.sauvegarde = new Date().toISOString(); });
+    toast('Sauvegarde téléchargée. Gardez-la sur votre ordinateur ou votre Drive.');
+  };
+  const importer = async (f) => {
+    try {
+      const data = JSON.parse(await f.text());
+      if (data.format !== 'crm-proposition' || !data.index || !data.dossiers) throw new Error();
+      const ent = data.index.dossiers || [];
+      if (!confirm(`Importer ${ent.length} dossier(s) de la sauvegarde du ${jourCourt(data.exporte)} ?\n\nVos dossiers actuels sont gardés. Un dossier déjà présent n'est remplacé que si la sauvegarde est plus récente.`)) return;
+      let ajout = 0, maj = 0;
+      try { ecrire(x => {
+        const neuf = !x.dossiers.length;
+        ent.forEach(e => {
+          const st = data.dossiers[e.id]; if (!st) return;
+          const i = x.dossiers.findIndex(y => y.id === e.id);
+          if (i < 0) { ecrireJSON(DK(e.id), st); x.dossiers.push(e); ajout++; }
+          else if ((e.maj || '') > (x.dossiers[i].maj || '')) { ecrireJSON(DK(e.id), st); x.dossiers[i] = e; maj++; }
+        });
+        x.compteur = Math.max(x.compteur || 1, data.index.compteur || 1);
+        if ((neuf || !x.modele) && data.index.modele) { x.modele = data.index.modele; x.modeleSource = data.index.modeleSource; }
+        if ((neuf || !vendeurInfo(x.vendeur || {}).tel) && data.index.vendeur) x.vendeur = data.index.vendeur;
+      }); } catch { return toast('Mémoire de l\'appareil pleine : import interrompu. Archivez ou supprimez des dossiers puis réessayez.'); }
+      toast(`${ajout} dossier(s) ajouté(s), ${maj} mis à jour.`);
+    } catch { toast('Ce fichier n\'est pas une sauvegarde du CRM.'); }
+  };
+  const rattacher = (o, i) => {
+    const cible = prompt(`Rattacher la signature du devis ${o.numero} (${o.sig.nom}) à quel dossier ? Tapez le nom du commerce :\n\n` + actifs.map(d => '• ' + d.entreprise).join('\n'), o.client || '');
+    if (!cible) return;
+    const d = ds.find(x => x.entreprise.toLowerCase() === cible.trim().toLowerCase());
+    if (!d) return toast('Aucun dossier à ce nom.');
+    const st = lireJSON(DK(d.id));
+    st.signes = { ...(st.signes || {}), [o.numero]: o.sig };
+    st.suivi = { ...(st.suivi || {}), etape: 'signe', historique: [...((st.suivi || {}).historique || []), { date: new Date().toISOString(), type: 'auto', texte: `Signature du devis ${o.numero} rattachée (${o.sig.nom})` }] };
+    ecrireJSON(DK(d.id), st); majEntree(d.id, st);
+    ecrire(x => { x.orphelins = (x.orphelins || []).filter((_, j) => j !== i); });
+    toast('Signature rattachée.');
+  };
+  const vieille = ds.length > 0 && (!idx.sauvegarde || (Date.now() - new Date(idx.sauvegarde)) > 7 * 864e5);
+  const memoire = tailleStockage(), memPct = Math.min(100, Math.round(memoire / 5e6 * 100));
+  const vi = vendeurInfo(idx.vendeur || {});
+  const Kpi = ({ id, titre, val, sous, cls }) => (
+    <button onClick={() => setFiltre(filtre === id ? 'tous' : id)} className={'rounded-2xl p-4 text-left transition ' + cls + (filtre === id ? ' ring-2 ring-ink' : '')}>
+      <p className="text-[11px] font-bold uppercase tracking-wider opacity-70">{titre}</p>
+      <p className="tabular font-display text-2xl font-bold leading-tight">{val}</p>
+      <p className="text-xs opacity-75">{sous}</p>
+    </button>
+  );
+  return (
+    <div className="min-h-screen pb-28">
+      <div className="sticky top-0 z-30 border-b border-gray-200 bg-white/90 backdrop-blur" style={{ paddingTop: 'env(safe-area-inset-top)' }}>
+        <div className="mx-auto flex max-w-5xl flex-wrap items-center gap-2 px-4 py-3 sm:px-6">
+          <div className="mr-auto">
+            <h1 className="font-display text-xl font-bold leading-tight sm:text-2xl">Mes clients</h1>
+            <p className="text-xs text-gray-500">{vi.nom || 'CRM de prospection'}</p>
+          </div>
+          <button onClick={sauvegarder} className="rounded-xl border border-gray-200 bg-white px-3 py-2 text-sm font-medium">⤓ Sauvegarder</button>
+          <button onClick={() => fichier.current.click()} className="rounded-xl border border-gray-200 bg-white px-3 py-2 text-sm font-medium">Importer</button>
+          <input ref={fichier} type="file" accept="application/json,.json" className="hidden" onChange={e => { e.target.files[0] && importer(e.target.files[0]); e.target.value = ''; }} />
+          <button onClick={() => setCreation(true)} className="hidden rounded-xl bg-accent px-4 py-2 text-sm font-semibold text-white sm:block">+ Nouveau client</button>
+        </div>
+      </div>
+      <main className="mx-auto max-w-5xl space-y-5 px-4 pt-5 sm:px-6">
+        {vieille && <div className="flex flex-wrap items-center gap-3 rounded-2xl bg-amber-50 px-4 py-3 text-sm text-amber-900 ring-1 ring-amber-200">
+          <span>💾 {idx.sauvegarde ? `Dernière sauvegarde le ${jourCourt(idx.sauvegarde)}.` : 'Aucune sauvegarde pour l\'instant.'} Vos clients ne sont enregistrés que sur cet appareil.</span>
+          <button onClick={sauvegarder} className="ml-auto rounded-lg bg-amber-500 px-3 py-1.5 font-semibold text-white">Sauvegarder maintenant</button></div>}
+        {(idx.orphelins || []).map((o, i) => (
+          <div key={i} className="flex flex-wrap items-center gap-3 rounded-2xl bg-emerald-50 px-4 py-3 text-sm text-emerald-900 ring-1 ring-emerald-200">
+            <span>✍ Signature reçue : devis {o.numero} signé par {o.sig.nom}{o.client ? ` (${o.client})` : ''}, sans dossier correspondant.</span>
+            <button onClick={() => rattacher(o, i)} className="ml-auto rounded-lg bg-emerald-600 px-3 py-1.5 font-semibold text-white">Rattacher</button></div>
+        ))}
+        <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+          <Kpi id="relances" titre="À relancer" val={relances.length} sous="aujourd'hui ou en retard" cls={relances.length ? 'bg-red-50 text-red-900' : 'bg-gray-50 text-gray-800'} />
+          <Kpi id="proposition" titre="Propositions en cours" val={eur(pipeEnCours)} sous={`${actifs.filter(d => d.etape === 'proposition').length} dossier(s), sur l'engagement`} cls="bg-amber-50 text-amber-900" />
+          <Kpi id="signe" titre="Devis signés" val={signes.length} sous={`${eur(signes.reduce((a, d) => a + d.montantP, 0))} + ${eur(signes.reduce((a, d) => a + d.montantM, 0))}/mois`} cls="bg-emerald-50 text-emerald-900" />
+          <Kpi id="tous" titre="Dossiers actifs" val={actifs.length} sous={`${enCours.length} en prospection`} cls="bg-sky-50 text-sky-900" />
+        </div>
+        <div className="space-y-3">
+          <input value={q} onChange={e => setQ(e.target.value)} placeholder="🔎 Rechercher un commerce, une ville, un téléphone…" className="w-full rounded-xl border border-gray-200 bg-white px-4 py-3 text-[15px] outline-none focus:border-ink" />
+          <div className="-mx-1 flex gap-1.5 overflow-x-auto px-1 pb-1">
+            {[['tous', 'Tous', actifs.length], ['relances', 'À relancer', relances.length], ...ETAPES.map(e => [e.id, e.label, actifs.filter(d => d.etape === e.id).length]), ['archives', 'Archivés', ds.filter(d => d.archive).length]].map(([id, l, n]) => (
+              <button key={id} onClick={() => setFiltre(id)} className={'shrink-0 rounded-full px-3 py-1.5 text-[13px] font-semibold ' + (filtre === id ? 'bg-ink text-white' : 'bg-white text-gray-600 ring-1 ring-gray-200')}>{l} <span className="opacity-60">{n}</span></button>
+            ))}
+          </div>
+        </div>
+        <div className="grid gap-3 md:grid-cols-2">
+          {liste.map(d => {
+            const e = etapeDe(d.etape), p = d.prochaine || {}, retard = p.date && p.date < auj && !['signe', 'perdu'].includes(d.etape), jour = p.date === auj;
+            return (
+              <div key={d.id} className="overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-sm" style={{ borderLeft: `5px solid ${e.coul}` }}>
+                <button onClick={() => ouvrir(d.id)} className="block w-full px-4 pt-3 text-left">
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <p className="truncate font-display text-[17px] font-bold">{d.entreprise}</p>
+                      <p className="truncate text-[13px] text-gray-500">{[d.secteur, d.ville, d.responsable].filter(Boolean).join(' · ') || '—'}</p>
+                    </div>
+                    <span className="shrink-0 rounded-full px-2.5 py-1 text-[11px] font-bold text-white" style={{ background: e.coul }}>{e.label}</span>
+                  </div>
+                  <div className="mt-2 flex flex-wrap items-baseline justify-between gap-2 text-[13px]">
+                    <span className="tabular font-semibold">{(d.chiffre ?? true) && (d.montantP > 0 || d.montantM > 0) ? [d.montantP > 0 && eur(d.montantP), d.montantM > 0 && eur(d.montantM) + '/mois'].filter(Boolean).join(' + ') : <span className="font-normal text-gray-500">Formules prêtes, pas encore chiffré</span>}</span>
+                    {p.date && !['signe', 'perdu'].includes(d.etape) && <span className={retard ? 'font-semibold text-red-600' : jour ? 'font-semibold text-amber-700' : 'text-gray-500'}>{retard ? '⚠ ' : '⏰ '}{jour ? "Aujourd'hui" : jourCourt(p.date)}{p.action ? ' · ' + p.action : ''}</span>}
+                  </div>
+                </button>
+                <div className="mt-2 flex items-center gap-1 border-t border-gray-100 px-2 py-1.5 text-[13px]">
+                  {d.telephone && <a href={'tel:' + d.telephone.replace(/\s/g, '')} className="rounded-lg px-2.5 py-1.5 font-semibold text-emerald-700 hover:bg-emerald-50">📞 Appeler</a>}
+                  <button onClick={() => ouvrir(d.id)} className="rounded-lg px-2.5 py-1.5 font-semibold text-ink hover:bg-gray-100">Ouvrir</button>
+                  <span className="ml-auto" />
+                  <button onClick={() => dupliquer(d)} className="rounded-lg px-2 py-1.5 text-gray-500 hover:bg-gray-100">Dupliquer</button>
+                  <button onClick={() => archiver(d)} className="rounded-lg px-2 py-1.5 text-gray-500 hover:bg-gray-100">{d.archive ? 'Désarchiver' : 'Archiver'}</button>
+                  <button onClick={() => supprimer(d)} className="rounded-lg px-2 py-1.5 text-gray-400 hover:bg-red-50 hover:text-red-600">Supprimer</button>
+                </div>
+              </div>
+            );
+          })}
+          {!liste.length && <div className="rounded-2xl border border-dashed border-gray-300 p-8 text-center text-gray-500 md:col-span-2">
+            {ds.length ? 'Aucun dossier ici.' : 'Aucun client pour l\'instant.'}<br /><button onClick={() => setCreation(true)} className="mt-3 rounded-xl bg-accent px-4 py-2 text-sm font-semibold text-white">+ Nouveau client</button></div>}
+        </div>
+        <p className="text-center text-[11px] text-gray-400">Mémoire utilisée sur cet appareil : {(memoire / 1e6).toFixed(1).replace('.', ',')} Mo sur environ 5 Mo ({memPct} %) · modèle de tarifs : {idx.modeleSource || '—'}</p>
+      </main>
+      <button onClick={() => setCreation(true)} className="fixed bottom-5 right-5 z-30 rounded-full bg-accent px-5 py-4 text-base font-semibold text-white shadow-xl sm:hidden" style={{ marginBottom: 'env(safe-area-inset-bottom)' }}>+ Nouveau client</button>
+      {creation && (
+        <div className="fixed inset-0 z-50 flex items-end justify-center bg-gray-900/40 sm:items-center" onClick={() => setCreation(false)}>
+          <div className="w-full max-w-lg rounded-t-3xl bg-white p-5 shadow-2xl sm:rounded-3xl" onClick={e => e.stopPropagation()} style={{ paddingBottom: 'calc(1.25rem + env(safe-area-inset-bottom))' }}>
+            <p className="font-display text-xl font-bold">Nouveau client</p>
+            <p className="text-sm text-gray-500">Formules et tarifs repris de « {idx.modeleSource || 'votre modèle'} ». Vous complétez le reste plus tard.</p>
+            <div className="mt-4 grid gap-3 sm:grid-cols-2">
+              <input autoFocus value={form.entreprise} onChange={e => setForm({ ...form, entreprise: e.target.value })} onKeyDown={e => e.key === 'Enter' && creer()} placeholder="Nom du commerce *" className="rounded-xl border border-gray-300 px-3 py-3 text-[15px] outline-none focus:border-ink sm:col-span-2" />
+              <input value={form.secteur} onChange={e => setForm({ ...form, secteur: e.target.value })} placeholder="Activité (boucherie, coiffeur…)" className="rounded-xl border border-gray-200 px-3 py-2.5 text-[15px] outline-none focus:border-ink" />
+              <input value={form.ville} onChange={e => setForm({ ...form, ville: e.target.value })} placeholder="Ville ou adresse" className="rounded-xl border border-gray-200 px-3 py-2.5 text-[15px] outline-none focus:border-ink" />
+              <input value={form.responsable} onChange={e => setForm({ ...form, responsable: e.target.value })} placeholder="Nom du gérant" className="rounded-xl border border-gray-200 px-3 py-2.5 text-[15px] outline-none focus:border-ink" />
+              <input type="tel" inputMode="tel" value={form.telephone} onChange={e => setForm({ ...form, telephone: e.target.value })} placeholder="Téléphone" className="rounded-xl border border-gray-200 px-3 py-2.5 text-[15px] outline-none focus:border-ink" />
+            </div>
+            <div className="mt-3 flex flex-wrap gap-1.5">
+              {ETAPES.slice(0, 3).map(e => <button key={e.id} onClick={() => setForm({ ...form, etape: e.id })} className={'rounded-full px-3 py-1.5 text-[13px] font-semibold ' + (form.etape === e.id ? 'text-white' : 'bg-gray-100 text-gray-600')} style={form.etape === e.id ? { background: e.coul } : {}}>{e.label}</button>)}
+            </div>
+            <div className="mt-5 flex gap-2">
+              <button onClick={() => setCreation(false)} className="rounded-xl px-4 py-3 text-sm font-medium text-gray-600">Annuler</button>
+              <button onClick={creer} className="flex-1 rounded-xl bg-accent py-3 text-[15px] font-semibold text-white">Créer et ouvrir le dossier</button>
+            </div>
+          </div>
+        </div>
+      )}
+      <Toast msg={msg} />
+    </div>
+  );
+}
+
+function App({ dossierId }) {
+  const [s, setS] = useState(() => {
+    if (!dossierId) return load();
+    const idx = lireJSON(IDX) || {};
+    const st = load(lireJSON(DK(dossierId)));
+    const vIdx = idx.vendeur && Object.values(idx.vendeur).some(x => String(x || '').trim() && x !== 'M.' && x !== DEFAULTS.vendeur.statut);
+    return { ...st, vendeur: { ...DEFAULTS.vendeur, ...(vIdx ? idx.vendeur : st.vendeur) } };
+  });
   FRANCHISE = num(s.tva) === 0;
+  DOSSIER_COURANT = dossierId || null;
+  useEffect(() => {
+    if (!dossierId) return;
+    const f = (e) => { if (e.key === DK(dossierId) && e.newValue) { try { setS(p => ({ ...load(JSON.parse(e.newValue)), vendeur: p.vendeur })); } catch {} } };
+    window.addEventListener('storage', f); return () => window.removeEventListener('storage', f);
+  }, [dossierId]);
   const [open, setOpen] = useState({ client: true });
   const [showProposal, setShowProposal] = useState(false);
   const [showDevis, setShowDevis] = useState(false);
@@ -1768,8 +2213,8 @@ function App() {
   const timer = useRef();
 
   useEffect(() => {
-    try { localStorage.setItem(STORE, JSON.stringify(s)); }
-    catch { toast('Mémoire locale pleine : retirez quelques photos.'); }
+    try { if (dossierId) { const r = sauverDossier(dossierId, s); if (r !== s && r && Object.keys(r.signes || {}).length !== Object.keys(s.signes || {}).length) setS(r); } else localStorage.setItem(STORE, JSON.stringify(s)); }
+    catch { toast('Mémoire de l\'appareil pleine : retirez des photos ou archivez des dossiers après une sauvegarde.'); }
   }, [s]);
 
   const toast = (m) => { setMsg(m); clearTimeout(timer.current); timer.current = setTimeout(() => setMsg(''), 4500); };
@@ -1814,9 +2259,10 @@ function App() {
   const packsCalc = useMemo(() => Object.fromEntries(s.packs.map(pk => [pk.id, calc(s, packLines(s, pk), pk.remises)])), [s]);
   const sugg = useMemo(() => suggestions(s.reponses), [s.reponses]);
   const numero = useMemo(() => {
+    if (s.suivi && s.suivi.numero) return s.suivi.numero; // numéro figé du dossier
     const d = today();
     return `DEV-${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, '0')}${String(d.getDate()).padStart(2, '0')}-${(s.client.entreprise || 'X').replace(/[^A-Za-z]/g, '').slice(0, 3).toUpperCase() || 'X'}`;
-  }, [s.client.entreprise]);
+  }, [s.client.entreprise, s.suivi && s.suivi.numero]);
 
   const answer = (q, o) => set(p => {
     const cur = p.reponses[q.id] || [];
@@ -1831,13 +2277,6 @@ function App() {
   };
   const addLogo = async (f) => { if (!f) return; try { const d = await compress(f, 600, 0.9); set(p => ({ visuels: { ...p.visuels, logo: d } })); } catch { toast('Image illisible.'); } };
 
-  const nouveauClient = () => {
-    if (!confirm('Commencer un nouveau client ? La fiche, les réponses, la sélection et les visuels seront effacés. Vos tarifs et vos coordonnées sont conservés.')) return;
-    set(p => ({ ...DEFAULTS, client: blankClient, visuels: { logo: '', photos: [], demoUrl: '' }, prestations: p.prestations.map(x => ({ ...x, selected: false })), vendeur: p.vendeur,
-      inclus: p.inclus, paiement: p.paiement, validite: p.validite, tva: p.tva, offres: p.offres, packs: p.packs, combos: p.combos, mode: 'carte', pack: '' }));
-    setPerso('');
-    setOpen({ client: true });
-  };
 
   const addCustom = (type, offre = 'base') => set(p => ({ prestations: [...p.prestations, { id: 'perso-' + Date.now(), type, nom: 'Nouvelle prestation', description: 'Description de la prestation', prix: 0, qte: 1, unite: '', selected: true, offre }] }));
 
@@ -1903,11 +2342,12 @@ function App() {
         <main className="mx-auto max-w-5xl space-y-4 px-4 pb-32 pt-6 sm:px-6">
           <div className="flex flex-wrap items-end justify-between gap-3 pb-2">
             <div>
-              <h1 className="font-display text-2xl font-semibold sm:text-3xl">Proposition commerciale</h1>
-              <p className="text-sm text-gray-500">Enregistrement automatique sur cet appareil.</p>
+              {dossierId && <a href="#/" className="mb-1 inline-block text-sm font-medium text-gray-500 hover:text-ink">← Mes clients</a>}
+              <h1 className="font-display text-2xl font-semibold sm:text-3xl">{dossierId ? (s.client.entreprise || 'Nouveau client') : 'Proposition commerciale'}</h1>
+              <p className="text-sm text-gray-500">{dossierId ? `Dossier client · devis N° ${numero} · enregistrement automatique` : 'Enregistrement automatique sur cet appareil.'}</p>
             </div>
-            <button onClick={nouveauClient} className="rounded-xl border border-gray-200 bg-white px-3.5 py-2 text-sm font-medium text-gray-600 hover:bg-gray-50">Nouveau client</button>
           </div>
+          {dossierId && <BandeauDossier s={s} set={set} toast={toast} numero={numero} />}
 
           {/* 1. Fiche client */}
           <Section n="1" title="Fiche client" hint={clientHint} open={!!open.client} onToggle={() => toggle('client')}>
@@ -2207,9 +2647,19 @@ function App() {
       {showProposal && !showDevis && <Proposal s={s} c={c} cTous={cTous} numero={numero} onClose={() => setShowProposal(false)} toast={toast}
         onExclu={(pid) => set(p => ({ exclus: { ...(p.exclus || {}), [pid]: !(p.exclus || {})[pid] } }))}
         onChoix={(choisi) => set({ choisi })} onOption={() => set(p => ({ optionOuverte: !p.optionOuverte }))} onDevis={(signer) => { setSignerAuto(signer === true); setShowDevis(true); window.scrollTo(0, 0); }} />}
-      {showProposal && showDevis && (() => { const d = devisCalc(s, c); return d
+      {showProposal && showDevis && (() => {
+        // devis signé : on montre la version signée, figée (pas l'état modifié depuis)
+        const sg = (s.signes || {})[numero], snapS = sg && sg.payload && lire(sg.payload);
+        if (snapS) return <Devis s={{ ...snapS.s, visuels: s.visuels }} d={snapS.d} numero={numero} dateFixe={snapS.date} toast={toast} onBack={() => setShowDevis(false)} signature={sg} />;
+        const d = devisCalc(s, c); return d
         ? <Devis s={s} d={d} numero={numero} toast={toast} onBack={() => setShowDevis(false)} signature={(s.signes || {})[numero]} signerAuto={signerAuto}
-            onEnvoi={(n, e) => set(p => ({ envois: { ...(p.envois || {}), [n]: { empreinte: e, date: new Date().toISOString() } } }))} />
+            onEnvoi={(n, e) => set(p => {
+              const deja = (p.envois || {})[n], su = p.suivi;
+              const suivi = su && !deja ? { ...su, etape: rangEtape(su.etape) < rangEtape('proposition') ? 'proposition' : su.etape,
+                ...(su.etape !== 'signe' ? { prochaine: { date: plusJours(3), action: 'Relancer pour la signature du devis' } } : {}),
+                historique: [...(su.historique || []), { date: new Date().toISOString(), type: 'auto', texte: `Lien de signature du devis ${n} créé` }] } : su;
+              return { envois: { ...(p.envois || {}), [n]: { empreinte: e, date: new Date().toISOString() } }, ...(suivi ? { suivi } : {}) };
+            })} />
         : (setTimeout(() => setShowDevis(false)), null); })()}
       <Toast msg={msg} />
     </>
