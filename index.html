@@ -37,6 +37,7 @@
     #proposal { font-size: 12.5px; }
     #proposal section { margin-top: 14px !important; }
     #proposal section + section { padding-top: 12px !important; }
+    #shell { padding-left: 0 !important; min-height: 0 !important; }
   }
 </style>
 <script src="https://unpkg.com/react@18.3.1/umd/react.production.min.js" crossorigin></script>
@@ -240,7 +241,7 @@ const DEFAULTS = {
   inclus: "Hébergement sécurisé et sauvegardes\nMises à jour de sécurité\nSupport par téléphone et email (réponse sous 48 h ouvrées)\nAccès aux statistiques",
   paiement: "Acompte à la signature, solde à la mise en ligne.\nAbonnements mensuels payables par prélèvement ou virement en début de mois.",
   validite: 30,
-  vendeur: { civilite: 'M.', nom: '', societe: '', statut: 'Entrepreneur individuel (EI)', telephone: '', email: '', siret: '' },
+  vendeur: { civilite: 'M.', nom: '', societe: '', adresse: '', statut: 'Entrepreneur individuel (EI)', telephone: '', email: '', siret: '' },
 };
 
 /* ============================ Utilitaires ============================ */
@@ -401,7 +402,7 @@ const vendeurInfo = (v = {}) => {
   const civ = (v.civilite ?? 'M.').trim();
   const personne = fmtNom(meme || b);
   return { nom: personne ? (civ ? civ + ' ' : '') + personne : '', societe: meme ? '' : a, statut: (v.statut ?? 'Entrepreneur individuel (EI)').trim(),
-    tel: fmtTel(v.telephone), email: (v.email || '').trim().toLowerCase(),
+    adresse: (v.adresse || '').trim(), tel: fmtTel(v.telephone), email: (v.email || '').trim().toLowerCase(),
     siret: (v.siret || '').replace(/\D/g, '').replace(/^(\d{3})(\d{3})(\d{3})(\d{5})$/, '$1 $2 $3 $4') };
 };
 
@@ -701,6 +702,7 @@ function BlocVendeur({ v, className = '', fort }) {
       {vi.societe && <p className={fort ? 'text-base font-semibold text-ink' : 'font-medium'}>{vi.societe}</p>}
       {vi.nom && <p className={!vi.societe && fort ? 'text-base font-semibold text-ink' : !vi.societe ? 'font-medium' : ''}>{vi.nom}</p>}
       {vi.statut && <p className="text-gray-600">{vi.statut}</p>}
+      {vi.adresse && <p className="text-gray-600">{vi.adresse}</p>}
       {(vi.tel || vi.email) && <p className="text-gray-600">{[vi.tel, vi.email].filter(Boolean).join(' · ')}</p>}
       {vi.siret && <p className="text-gray-500">SIRET {vi.siret}</p>}
     </div>
@@ -1508,6 +1510,10 @@ function Racine() {
   if (m && lireJSON(DK(m[1]))) return m[2] ? <App key={m[1]} dossierId={m[1]} /> : <Fiche360 key={m[1] + hash} id={m[1]} />;
   if (hash.startsWith('#/clients')) return <Accueil />;
   if (hash.startsWith('#/pipeline')) return <Pipeline />;
+  const mc = hash.match(/^#\/commande\/([\w-]+)/); if (mc) return <PageCommande key={mc[1]} id={mc[1]} />;
+  const mf = hash.match(/^#\/facture\/([\w-]+)/); if (mf) return <PageFacture key={mf[1]} id={mf[1]} />;
+  if (hash.startsWith('#/commandes')) return <PageCommandes />;
+  if (hash.startsWith('#/factures')) return <PageFactures />;
   return <Dashboard />;
 }
 
@@ -2074,7 +2080,7 @@ function Accueil() {
   const sauvegarder = () => {
     const x = lireJSON(IDX), dossiers = {};
     x.dossiers.forEach(d => { dossiers[d.id] = lireJSON(DK(d.id)); });
-    const blob = new Blob([JSON.stringify({ format: 'crm-proposition', v: 2, exporte: new Date().toISOString(), index: x, dossiers })], { type: 'application/json' });
+    const blob = new Blob([JSON.stringify({ format: 'crm-proposition', v: 3, exporte: new Date().toISOString(), index: x, dossiers, finance: lireJSON(FK) })], { type: 'application/json' });
     const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = `crm-sauvegarde-${isoJour()}.json`; a.click();
     setTimeout(() => URL.revokeObjectURL(a.href), 2000);
     ecrire(y => { y.sauvegarde = new Date().toISOString(); });
@@ -2096,6 +2102,13 @@ function Accueil() {
           else if ((e.maj || '') > (x.dossiers[i].maj || '')) { ecrireJSON(DK(e.id), st); x.dossiers[i] = e; maj++; }
         });
         x.compteur = Math.max(x.compteur || 1, data.index.compteur || 1);
+        if (data.finance) { // finance : on ajoute ce qui manque (par identifiant), on ne remplace rien d'émis
+          const loc = lireFinance(), ids = (k) => new Set(loc[k].map(y => y.id));
+          ['commandes', 'factures', 'paiements'].forEach(k => { const deja = ids(k); (data.finance[k] || []).forEach(y => { if (!deja.has(y.id)) loc[k].push(y); }); });
+          Object.entries(data.finance.compteurs || {}).forEach(([c, n]) => { loc.compteurs[c] = Math.max(loc.compteurs[c] || 0, n); });
+          loc.journal = [...(loc.journal || []), { date: new Date().toISOString(), action: 'import de sauvegarde', ref: jourCourt(data.exporte) }];
+          ecrireJSON(FK, loc);
+        }
         if ((neuf || !x.modele) && data.index.modele) { x.modele = data.index.modele; x.modeleSource = data.index.modeleSource; }
         if ((neuf || !vendeurInfo(x.vendeur || {}).tel) && data.index.vendeur) x.vendeur = data.index.vendeur;
       }); } catch { return toast('Mémoire de l\'appareil pleine : import interrompu. Archivez ou supprimez des dossiers puis réessayez.'); }
@@ -2281,14 +2294,14 @@ function indicateurs(ds, periode) {
 }
 
 // Navigation latérale (ordinateur) et barre du bas (téléphone)
-const NAV = [['#/', 'Tableau de bord', '◧'], ['#/clients', 'Clients', '☰'], ['#/pipeline', 'Pipeline', '⇶']];
-const NAV_BIENTOT = [['Commandes', 2], ['Factures', 2], ['Abonnements', 3], ['Dépenses', 3], ['Statistiques', 3]];
+const NAV = [['#/', 'Tableau de bord', '◧', 'dashboard'], ['#/clients', 'Clients', '☰', 'clients'], ['#/pipeline', 'Pipeline', '⇶', 'pipeline'], ['#/commandes', 'Commandes', '▣', 'commandes'], ['#/factures', 'Factures', '€', 'factures']];
+const NAV_BIENTOT = [['Abonnements', 3], ['Dépenses', 3], ['Statistiques', 3]];
 function Shell({ page, children }) {
   const vi = vendeurInfo((lireJSON(IDX) || {}).vendeur || {});
-  const actif = (h) => (h === '#/' ? page === 'dashboard' : h === '#/clients' ? page === 'clients' : page === 'pipeline');
+  const actif = (h) => (NAV.find(n => n[0] === h) || [])[3] === page;
   return (
-    <div className="min-h-screen lg:pl-60">
-      <aside className="fixed inset-y-0 left-0 z-40 hidden w-60 flex-col border-r border-gray-200 bg-white px-3 py-5 lg:flex">
+    <div id="shell" className="min-h-screen lg:pl-60">
+      <aside className="no-print fixed inset-y-0 left-0 z-40 hidden w-60 flex-col border-r border-gray-200 bg-white px-3 py-5 lg:flex">
         <p className="px-3 font-display text-lg font-bold leading-tight">CRM commercial</p>
         <p className="truncate px-3 text-xs text-gray-500">{vi.nom}</p>
         <nav className="mt-6 space-y-1">
@@ -2300,7 +2313,7 @@ function Shell({ page, children }) {
         </div>
       </aside>
       {children}
-      <nav className="fixed inset-x-0 bottom-0 z-40 grid grid-cols-3 border-t border-gray-200 bg-white/95 backdrop-blur lg:hidden" style={{ paddingBottom: 'env(safe-area-inset-bottom)' }}>
+      <nav className="no-print fixed inset-x-0 bottom-0 z-40 grid grid-cols-5 border-t border-gray-200 bg-white/95 backdrop-blur lg:hidden" style={{ paddingBottom: 'env(safe-area-inset-bottom)' }}>
         {NAV.map(([h, l, i]) => <a key={h} href={h} className={'flex flex-col items-center py-2 text-[11px] font-semibold ' + (actif(h) ? 'text-ink' : 'text-gray-400')}><span className="text-lg leading-none">{i}</span>{l}</a>)}
       </nav>
     </div>
@@ -2326,6 +2339,14 @@ function Dashboard() {
   const choisir = (p) => { setPeriode(p); try { localStorage.setItem('crm-periode', p); } catch {} };
   const ds = idx.dossiers.map(d => ({ ...d, etape: normEtape(d.etape) }));
   const k = indicateurs(ds, periode), auj = isoJour();
+  const fin = lireFinance();
+  const emisesP = fin.factures.filter(x => x.statut !== 'brouillon' && dansPeriode(x.dateEmission, periode));
+  const caFacture = emisesP.reduce((a, x) => a + (x.type === 'avoir' ? -x.totalTTC : x.totalTTC), 0);
+  const encaisse = fin.paiements.filter(p => dansPeriode(p.date, periode)).reduce((a, p) => a + (p.type === 'remboursement' ? -p.montant : p.montant), 0);
+  const ouvertesF = fin.factures.filter(x => x.type === 'facture' && x.statut !== 'brouillon').map(x => etatFacture(x, fin));
+  const resteDu = ouvertesF.reduce((a, e) => a + e.reste, 0), enRetard = ouvertesF.filter(e => e.statut === 'retard');
+  const aLivrer = fin.commandes.filter(c => ['en_cours', 'validation'].includes(c.statut));
+  const prochLivr = [...aLivrer].sort((a, b) => (a.livraisonPrevue || '').localeCompare(b.livraisonPrevue || ''))[0];
   const lib = PERIODES.find(x => x[0] === periode)[1].toLowerCase();
   return (
     <Shell page="dashboard">
@@ -2338,11 +2359,11 @@ function Dashboard() {
           <p className="mb-2 text-xs font-bold uppercase tracking-wider text-gray-500">L'essentiel</p>
           <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
             <Tuile titre="1 · Vendu (CA signé)" val={eur(k.caSigne)} sous={`${k.nbSignes} devis signé(s) ${lib} · ${eur(k.caSigneP)} + ${eur(k.caSigneM)}/mois`} cls="bg-emerald-50 text-emerald-900" href="#/pipeline" />
-            <Tuile titre="2 · Encaissé" bientot="facturation (phase 2)" />
-            <Tuile titre="3 · Ce qu'on me doit" bientot="facturation (phase 2)" />
+            <Tuile titre="2 · Encaissé" val={eurC(encaisse)} sous={`paiements reçus ${lib} · facturé ${eurC(caFacture)}`} cls="bg-emerald-50 text-emerald-900" href="#/factures" />
+            <Tuile titre="3 · Ce qu'on me doit" val={eurC(resteDu)} sous={enRetard.length ? `dont ${eurC(enRetard.reduce((a, e) => a + e.reste, 0))} en retard (${enRetard.length} facture(s))` : 'factures émises non réglées'} cls={enRetard.length ? 'bg-red-50 text-red-900' : 'bg-amber-50 text-amber-900'} href="#/factures" />
             <Tuile titre="4 · Abonnements (MRR)" val={eur(k.mrr) + '/mois'} sous={`soit ${eur(k.mrr * 12)} par an · clients gagnés`} cls="bg-sky-50 text-sky-900" />
             <Tuile titre="5 · Encore à signer" val={eur(k.montantAttente)} sous={`${k.enAttente} devis en attente · pondéré ${eur(k.pondere)}`} cls="bg-amber-50 text-amber-900" href="#/pipeline" />
-            <Tuile titre="6 · À livrer" bientot="gestion des commandes (phase 2)" />
+            <Tuile titre="6 · À livrer" val={aLivrer.length} sous={prochLivr ? `prochaine livraison le ${jourCourt(prochLivr.livraisonPrevue)}` : 'aucune commande en cours'} cls="bg-violet-50 text-violet-900" href="#/commandes" />
             <Tuile titre="7 · Ce que ça coûte" bientot="saisie des dépenses (phase 3)" />
             <Tuile titre="8 · Rentabilité" bientot="saisie des dépenses (phase 3)" />
           </div>
@@ -2371,7 +2392,7 @@ function Dashboard() {
               : <p className="mt-2 text-sm text-gray-500">Aucun rendez-vous à venir. Fixez-en un depuis la fiche d'un client.</p>}
           </div>
         </section>
-        <p className="text-[12px] text-gray-400">« Vendu » compte les devis signés sur la période : la création, plus le mensuel sur la durée d'engagement. Ce n'est pas de l'argent encaissé : l'encaissement arrive avec la facturation (phase 2).</p>
+        <p className="text-[12px] text-gray-400">« Vendu » = devis signés sur la période (création + mensuel sur l'engagement). « Encaissé » = paiements réellement reçus. Un devis signé n'est jamais compté comme encaissé.</p>
       </div>
     </Shell>
   );
@@ -2442,8 +2463,20 @@ function Fiche360({ id }) {
   const numero = su.numero || '';
   const env = (st.envois || {})[numero], sig = (st.signes || {})[numero];
   const prop = '#/c/' + id + '/proposition';
+  const [fin, majFin] = useFinance();
+  const [paie, setPaie] = useState(false);
+  const cmds = fin.commandes.filter(c => c.dossierId === id), facts = fin.factures.filter(x => x.dossierId === id);
+  const solde = soldesClients(fin)[id] || { facture: 0, encaisse: 0, solde: 0, retard: 0 };
+  const sansCommande = signesL.filter(x => !cmds.some(c => c.devisNumero === x.numero));
+  const nouvelleCommande = (n) => { const cid = creerCommande(majFin, id, n); if (cid) location.hash = '#/commande/' + cid; else toast('Devis introuvable.'); };
   // une seule action principale, selon la situation
   const action = (() => {
+    if (sansCommande.length) return { l: `Créer la commande (devis ${sansCommande[0].numero})`, f: () => nouvelleCommande(sansCommande[0].numero) };
+    if (e.etape === 'signe' && !signesL.length && !cmds.length) return { l: 'Créer la commande à partir du devis en cours', f: () => confirm('Aucun devis signé électroniquement : créer la commande à partir du devis en cours ?') && nouvelleCommande(numero) };
+    if (solde.retard > 0) return { l: `Relancer l'impayé (${eurC(solde.retard)})`, h: cl.telephone ? 'tel:' + cl.telephone.replace(/\s/g, '') : '#/factures' };
+    const brouillonF = facts.find(x => x.statut === 'brouillon'); if (brouillonF) return { l: 'Finaliser et émettre la facture', h: '#/facture/' + brouillonF.id };
+    const cmdNonFact = cmds.find(c => c.netP > 0 && !facts.some(x => x.commandeId === c.id)); if (cmdNonFact) return { l: `Facturer la commande ${cmdNonFact.numero}`, h: '#/commande/' + cmdNonFact.id };
+    if (solde.solde > 0) return { l: `Enregistrer un paiement (reste ${eurC(solde.solde)})`, f: () => { setOuvert(o => ({ ...o, factures: true })); setPaie(true); } };
     if (e.etape === 'signe') return sig ? { l: '+ Nouveau devis (avenant) depuis la proposition', h: prop } : { l: 'Ouvrir la proposition', h: prop };
     if (e.etape === 'perdu') return { l: 'Relancer ce prospect', f: () => { changerEtapeDossier(id, 'a_contacter') && setSt(load(lireJSON(DK(id)))); } };
     if (env && !sig) return { l: '📞 Relancer pour la signature', h: cl.telephone ? 'tel:' + cl.telephone.replace(/\s/g, '') : prop };
@@ -2479,7 +2512,7 @@ function Fiche360({ id }) {
             <span className="rounded-full px-3 py-1 text-xs font-bold text-white" style={{ background: et.coul }}>{et.label}</span>
           </div>
           <div className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-4">
-            {[['CA signé', caSigne ? eur(caSigne) : '—'], ['Encaissé', '— (phase 2)'], ['Solde à recevoir', '— (phase 2)'], ['Abonnements actifs', mrr ? eur(mrr) + '/mois' : '—']].map(([l, v]) => (
+            {[['CA signé', caSigne ? eur(caSigne) : '—'], ['Encaissé', eurC(solde.encaisse)], ['Solde à recevoir', solde.solde ? eurC(solde.solde) + (solde.retard ? ' ⚠' : '') : '—'], ['Abonnements actifs', mrr ? eur(mrr) + '/mois' : '—']].map(([l, v]) => (
               <div key={l} className="rounded-xl bg-gray-50 px-3 py-2"><p className="text-[11px] font-bold uppercase tracking-wider text-gray-500">{l}</p><p className="tabular font-semibold">{v}</p></div>
             ))}
           </div>
@@ -2522,13 +2555,420 @@ function Fiche360({ id }) {
             <p className="text-xs text-gray-500">Le suivi des versions et de l'acceptation de chaque devis est en place (empreinte et signature). La version détaillée arrive en phase 2.</p>
           </div>
         </>)}
-        {section('commandes', '3', 'Commandes et production', <p className="text-sm text-gray-500">Création d'une commande à partir d'un devis signé, tâches, livraison, site internet et réseaux sociaux : en phase 2.</p>, 'phase 2')}
-        {section('factures', '4', 'Factures et paiements', <p className="text-sm text-gray-500">Factures numérotées, acomptes, paiements, avoirs et soldes : en phase 2. Un devis signé n'est jamais compté comme encaissé.</p>, 'phase 2')}
+        {section('commandes', '3', 'Commandes et production', <div className="space-y-2 text-sm">
+          {cmds.map(c => { const fait = c.taches.filter(t => t.fait).length; return <a key={c.id} href={'#/commande/' + c.id} className="flex flex-wrap items-center justify-between gap-2 rounded-xl bg-gray-50 px-3 py-2.5 hover:bg-gray-100">
+            <span><b>{c.numero}</b> · {c.titre} · {fait}/{c.taches.length} tâches · livraison {jourCourt(c.livraisonPrevue)}</span><span className="rounded-full px-2.5 py-0.5 text-[11px] font-bold text-white" style={{ background: STATUTS_COMMANDE[c.statut][1] }}>{STATUTS_COMMANDE[c.statut][0]}</span></a>; })}
+          {sansCommande.map(x => <button key={x.numero} onClick={() => nouvelleCommande(x.numero)} className="w-full rounded-xl border border-dashed border-gray-300 px-3 py-2.5 text-left font-medium hover:bg-gray-50">+ Créer la commande du devis signé {x.numero}</button>)}
+          {!cmds.length && !sansCommande.length && <p className="text-gray-500">Aucune commande. Elle se crée quand un devis est signé.</p>}
+        </div>, cmds.length ? cmds.length + '' : '')}
+        {section('factures', '4', 'Factures et paiements', <div className="space-y-2 text-sm">
+          <div className="grid grid-cols-3 gap-2">{[['Facturé', solde.facture], ['Encaissé', solde.encaisse], ['Solde dû', solde.solde]].map(([l, v]) => <div key={l} className="rounded-xl bg-gray-50 px-3 py-2"><p className="text-[11px] font-bold uppercase tracking-wider text-gray-500">{l}</p><p className="tabular font-semibold">{eurC(v)}</p></div>)}</div>
+          {facts.map(x => <a key={x.id} href={'#/facture/' + x.id} className="flex flex-wrap items-center justify-between gap-2 rounded-xl px-3 py-2 hover:bg-gray-50"><span><b>{x.numero || 'Brouillon'}</b> · {x.objet}</span><span className="flex items-center gap-2"><span className="tabular">{x.type === 'avoir' ? '−' : ''}{eurC(x.totalTTC)}</span><Badge k={etatFacture(x, fin).statut} /></span></a>)}
+          {solde.solde > 0 && (paie ? <div className="rounded-xl bg-gray-50 p-3"><FormPaiement f={fin} maj={majFin} dossierId={id} onFini={() => { setPaie(false); toast('Paiement enregistré.'); }} /></div>
+            : <button onClick={() => setPaie(true)} className="rounded-xl bg-emerald-600 px-4 py-2 font-semibold text-white">+ Enregistrer un paiement</button>)}
+          {!facts.length && <p className="text-gray-500">Aucune facture. Elles se créent depuis une commande : acompte, solde ou mensualité.</p>}
+        </div>, facts.length ? facts.length + '' : '')}
         {section('histo', '5', 'Historique et documents', <>
           <ul className="max-h-80 space-y-1.5 overflow-y-auto text-[13px]">
             {[...(su.historique || [])].reverse().map((h, i) => <li key={i} className="flex gap-2"><span className="w-20 shrink-0 text-gray-400">{jourCourt(h.date)}</span><span className={h.type === 'auto' ? 'text-gray-500' : ''}>{TYPES_ECHANGE[h.type] || ''} {h.texte}</span></li>)}
           </ul>
         </>)}
+      </div>
+      <Toast msg={msg} />
+    </Shell>
+  );
+}
+
+/* ============================ Phase 2 : commandes, factures, paiements, avoirs ============================ */
+// Montants financiers en CENTIMES (entiers) : pas d'erreur d'arrondi. Une facture émise n'est jamais modifiée :
+// on la corrige par un avoir. Ce module aide à facturer ; ce n'est pas un logiciel de comptabilité certifié.
+const FK = 'crm-v3-finance';
+const cts = (e) => Math.round(num(e) * 100);
+const eurC = (c) => eur((c || 0) / 100);
+const lireFinance = () => ({ v: 1, compteurs: {}, commandes: [], factures: [], paiements: [], journal: [], ...(lireJSON(FK) || {}) });
+const prochainNumero = (f, type) => {
+  const an = new Date().getFullYear(), k = type + '-' + an;
+  f.compteurs = { ...(f.compteurs || {}) }; f.compteurs[k] = (f.compteurs[k] || 0) + 1;
+  return `${{ facture: 'FA', avoir: 'AV', commande: 'CMD' }[type]}-${an}-${String(f.compteurs[k]).padStart(type === 'commande' ? 3 : 4, '0')}`;
+};
+function useFinance() {
+  const [f, setF] = useState(lireFinance);
+  useEffect(() => { const h = (e) => { if (e.key === FK) setF(lireFinance()); }; window.addEventListener('storage', h); return () => window.removeEventListener('storage', h); }, []);
+  // maj(fn, journal) : modifie, trace et enregistre ; renvoie ce que fn renvoie
+  const maj = (fn, journal) => { const x = lireFinance(); const r = fn(x); if (journal) x.journal = [...(x.journal || []), { date: new Date().toISOString(), ...journal }];
+    ecrireJSON(FK, x); setF(x); return r; };
+  return [f, maj];
+}
+const MODES_PAIEMENT = ['Virement', 'Carte bancaire', 'Chèque', 'Espèces', 'Prélèvement'];
+const STATUTS_FACTURE = {
+  brouillon: ['Brouillon', 'bg-gray-100 text-gray-700'], emise: ['Émise', 'bg-sky-100 text-sky-800'], envoyee: ['Envoyée', 'bg-indigo-100 text-indigo-800'],
+  partielle: ['Partiellement payée', 'bg-amber-100 text-amber-800'], payee: ['Payée', 'bg-emerald-100 text-emerald-800'], retard: ['En retard', 'bg-red-100 text-red-700'],
+  annulee: ['Annulée par avoir', 'bg-gray-200 text-gray-600 line-through'], avoir: ['Avoir', 'bg-violet-100 text-violet-800'],
+};
+const STATUTS_COMMANDE = { en_cours: ['En cours', '#0369a1'], validation: ['Validation client', '#b45309'], livree: ['Livrée', '#047857'], annulee: ['Annulée', '#9ca3af'] };
+const Badge = ({ k, map = STATUTS_FACTURE }) => <span className={'whitespace-nowrap rounded-full px-2.5 py-0.5 text-[11px] font-bold ' + (map[k] || ['', ''])[1]}>{(map[k] || [k])[0]}</span>;
+const totalLignes = (lignes) => lignes.reduce((a, x) => a + Math.round(num(x.qte || 1) * (x.pu || 0)), 0);
+
+// État de paiement d'une facture, calculé (jamais saisi à la main)
+function etatFacture(fa, f) {
+  if (fa.type === 'avoir') return { paye: 0, avoirs: 0, du: -fa.totalTTC, reste: 0, statut: fa.statut === 'brouillon' ? 'brouillon' : 'avoir' };
+  const paye = f.paiements.filter(p => p.factureId === fa.id).reduce((a, p) => a + (p.type === 'remboursement' ? -p.montant : p.montant), 0);
+  const avoirs = f.factures.filter(x => x.type === 'avoir' && x.factureOrigine === fa.id && x.statut !== 'brouillon').reduce((a, x) => a + x.totalTTC, 0);
+  const du = fa.totalTTC - avoirs, reste = du - paye;
+  let statut = fa.statut;
+  if (fa.statut !== 'brouillon') {
+    if (avoirs >= fa.totalTTC && paye <= 0) statut = 'annulee';
+    else if (reste <= 0) statut = 'payee';
+    else if (fa.dateEcheance && fa.dateEcheance < isoJour()) statut = 'retard';
+    else if (paye > 0) statut = 'partielle';
+  }
+  return { paye, avoirs, du, reste: Math.max(0, reste), trop: Math.max(0, -reste), statut };
+}
+// Soldes par client : facturé (factures émises − avoirs) − encaissé
+function soldesClients(f) {
+  const s = {};
+  const ligne = (id) => (s[id] = s[id] || { facture: 0, encaisse: 0, retard: 0 });
+  f.factures.filter(x => x.statut !== 'brouillon').forEach(x => { ligne(x.dossierId).facture += x.type === 'avoir' ? -x.totalTTC : x.totalTTC;
+    if (x.type !== 'avoir' && etatFacture(x, f).statut === 'retard') ligne(x.dossierId).retard += etatFacture(x, f).reste; });
+  f.paiements.forEach(p => { ligne(p.dossierId).encaisse += p.type === 'remboursement' ? -p.montant : p.montant; });
+  Object.values(s).forEach(x => { x.solde = x.facture - x.encaisse; });
+  return s;
+}
+const nomDossier = (id) => ((lireJSON(IDX) || { dossiers: [] }).dossiers.find(d => d.id === id) || {}).entreprise || 'Client supprimé';
+
+// Commande créée à partir d'un devis signé (version signée figée) ou, à défaut, du devis en cours
+const SITE_IDS = ['site', 'miseenligne', 'domaine', 'hebergement', 'maintenance', 'majsite'];
+const SOCIAL_IDS = ['social', 'contenus', 'reels', 'tiktok', 'blog'];
+function creerCommande(maj, dossierId, devisNumero) {
+  const st = load(lireJSON(DK(dossierId)));
+  const sg = (st.signes || {})[devisNumero], sn = sg && sg.payload && lire(sg.payload);
+  const d = sn ? sn.d : devisCalc(st, compute(st));
+  if (!d) return null;
+  const lignes = (part, type) => part.groupes.flatMap(o => o.lignes.map(p => ({ id: p.id, nom: p.nom, type, qte: Math.max(1, num(p.qte) || 1), pu: cts(p.prix) })));
+  const lP = lignes(d.P, 'ponctuel'), lM = lignes(d.M, 'mensuel');
+  const ids = [...lP, ...lM].map(x => x.id);
+  return maj(f => {
+    const c = { id: nouvelId(), numero: prochainNumero(f, 'commande'), dossierId, devisNumero, titre: d.titre, creeLe: new Date().toISOString(),
+      lignes: [...lP, ...lM], brutP: cts(d.P.brut), netP: cts(d.P.ttc), brutM: cts(d.M.brut), netM: cts(d.M.ttc), mois: d.mois || 0,
+      acomptePct: st.acompte && st.acompte.actif ? num(st.acompte.pct) : 0, statut: 'en_cours', livraisonPrevue: plusJours(30), responsable: vendeurInfo(st.vendeur).nom,
+      taches: lP.map(x => ({ id: nouvelId(), texte: 'Réaliser : ' + x.nom, responsable: '', echeance: '', fait: false })),
+      site: ids.some(i => SITE_IDS.includes(i)) ? { url: '', domaine: '', hebergement: '', maintenance: lM.some(x => x.id === 'maintenance') ? 'Incluse' : '', miseEnLigne: '', renouvellement: '' } : null,
+      social: ids.some(i => SOCIAL_IDS.includes(i)) ? { frequence: '', prevues: 0, produites: 0, publiees: 0 } : null,
+      validationClient: '', livreeLe: '' };
+    f.commandes = [...f.commandes, c];
+    return c.id;
+  }, { action: 'commande créée', ref: devisNumero, dossierId });
+}
+
+// Factures : acompte, solde (en déduisant les acomptes), mensualité, ou libre. Créées en brouillon.
+function creerFacture(maj, cmd, mode) {
+  const st = load(lireJSON(DK(cmd.dossierId)));
+  const tva = num(st.tva);
+  return maj(f => {
+    const deCmd = f.factures.filter(x => x.commandeId === cmd.id && x.statut !== 'brouillon' && x.type === 'facture' && etatFacture(x, f).statut !== 'annulee');
+    let lignes = [], objet = '';
+    if (mode === 'acompte') {
+      const pct = cmd.acomptePct || 30;
+      objet = `Acompte de ${pct} % · commande ${cmd.numero} (devis ${cmd.devisNumero})`;
+      lignes = [{ designation: `Acompte de ${pct} % sur la commande ${cmd.numero} : ${cmd.titre}`, qte: 1, pu: Math.round(cmd.netP * pct / 100) }];
+    } else if (mode === 'solde') {
+      objet = `Réalisations · commande ${cmd.numero} (devis ${cmd.devisNumero})`;
+      lignes = cmd.lignes.filter(x => x.type === 'ponctuel').map(x => ({ designation: x.nom, qte: x.qte, pu: x.pu }));
+      if (cmd.brutP - cmd.netP > 0) lignes.push({ designation: 'Remise commerciale', qte: 1, pu: -(cmd.brutP - cmd.netP) });
+      deCmd.filter(x => x.nature === 'acompte').forEach(x => lignes.push({ designation: `Acompte déjà facturé (facture ${x.numero})`, qte: 1, pu: -x.totalHT }));
+    } else if (mode === 'mensuel') {
+      const mois = new Date().toLocaleDateString('fr-FR', { month: 'long', year: 'numeric' });
+      objet = `Abonnement · ${mois} · commande ${cmd.numero}`;
+      lignes = cmd.lignes.filter(x => x.type === 'mensuel').map(x => ({ designation: `${x.nom} (${mois})`, qte: x.qte, pu: x.pu }));
+      if (cmd.brutM - cmd.netM > 0) lignes.push({ designation: 'Remise commerciale', qte: 1, pu: -(cmd.brutM - cmd.netM) });
+    } else { objet = `Commande ${cmd.numero}`; lignes = [{ designation: '', qte: 1, pu: 0 }]; }
+    const fa = { id: nouvelId(), type: 'facture', nature: mode, numero: '', statut: 'brouillon', dossierId: cmd.dossierId, commandeId: cmd.id, objet, lignes, tva,
+      dateEmission: '', dateEcheance: '', creeLe: new Date().toISOString(), journal: [{ date: new Date().toISOString(), texte: 'Brouillon créé' }] };
+    Object.assign(fa, totauxFacture(fa));
+    f.factures = [...f.factures, fa];
+    return fa.id;
+  }, { action: 'brouillon de facture', ref: cmd.numero, dossierId: cmd.dossierId });
+}
+const totauxFacture = (fa) => { const ht = totalLignes(fa.lignes); const t = Math.round(ht * num(fa.tva) / 100); return { totalHT: ht, totalTVA: t, totalTTC: ht + t }; };
+
+// ---------- écrans ----------
+function PageCommandes() {
+  const [f] = useFinance();
+  const [filtre, setFiltre] = useState('actives');
+  const liste = f.commandes.filter(c => filtre === 'toutes' || (filtre === 'actives' ? ['en_cours', 'validation'].includes(c.statut) : c.statut === filtre))
+    .sort((a, b) => (a.livraisonPrevue || '').localeCompare(b.livraisonPrevue || ''));
+  return (
+    <Shell page="commandes">
+      <div className="mx-auto max-w-5xl space-y-4 px-4 pb-28 pt-6 sm:px-6">
+        <h1 className="font-display text-2xl font-bold sm:text-3xl">Commandes et production</h1>
+        <div className="flex flex-wrap gap-1.5">{[['actives', 'À livrer'], ['livree', 'Livrées'], ['annulee', 'Annulées'], ['toutes', 'Toutes']].map(([k, l]) =>
+          <button key={k} onClick={() => setFiltre(k)} className={'rounded-full px-3 py-1.5 text-[13px] font-semibold ' + (filtre === k ? 'bg-ink text-white' : 'bg-white text-gray-600 ring-1 ring-gray-200')}>{l}</button>)}</div>
+        {liste.length ? <div className="grid gap-3 md:grid-cols-2">{liste.map(c => {
+          const fait = c.taches.filter(t => t.fait).length, pct = c.taches.length ? Math.round(fait / c.taches.length * 100) : 0, retard = c.livraisonPrevue < isoJour() && ['en_cours', 'validation'].includes(c.statut);
+          return <a key={c.id} href={'#/commande/' + c.id} className="block rounded-2xl bg-white p-4 ring-1 ring-black/5 hover:shadow-md">
+            <div className="flex items-start justify-between gap-2"><div className="min-w-0"><p className="truncate font-semibold">{nomDossier(c.dossierId)}</p><p className="truncate text-xs text-gray-500">{c.numero} · {c.titre}</p></div>
+              <span className="rounded-full px-2.5 py-0.5 text-[11px] font-bold text-white" style={{ background: STATUTS_COMMANDE[c.statut][1] }}>{STATUTS_COMMANDE[c.statut][0]}</span></div>
+            <div className="mt-3 h-2 overflow-hidden rounded-full bg-gray-100"><div className="h-full rounded-full bg-emerald-500" style={{ width: pct + '%' }} /></div>
+            <p className="mt-1.5 flex justify-between text-xs text-gray-500"><span>{fait}/{c.taches.length} tâches · {pct} %</span><span className={retard ? 'font-semibold text-red-600' : ''}>{retard ? '⚠ ' : ''}Livraison {jourCourt(c.livraisonPrevue)}</span></p>
+          </a>; })}</div>
+          : <div className="rounded-2xl border border-dashed border-gray-300 p-8 text-center text-sm text-gray-500">Aucune commande ici. Une commande se crée depuis la fiche d'un client, à partir d'un devis signé.</div>}
+      </div>
+    </Shell>
+  );
+}
+
+function PageCommande({ id }) {
+  const [f, maj] = useFinance();
+  const c = f.commandes.find(x => x.id === id);
+  const [tache, setTache] = useState('');
+  const [msg, setMsg] = useState('');
+  if (!c) return <Shell page="commandes"><div className="p-8 text-center text-gray-500">Commande introuvable. <a href="#/commandes" className="underline">Retour</a></div></Shell>;
+  const toast = (m) => { setMsg(m); setTimeout(() => setMsg(''), 4000); };
+  const set = (patch, j) => maj(x => { x.commandes = x.commandes.map(y => y.id === id ? { ...y, ...(typeof patch === 'function' ? patch(y) : patch) } : y); }, j);
+  const fact = f.factures.filter(x => x.commandeId === id);
+  const acompteFait = fact.some(x => x.nature === 'acompte' && x.statut !== 'brouillon'), soldeFait = fact.some(x => x.nature === 'solde');
+  const nouvelle = (mode) => { const fid = creerFacture(maj, c, mode); location.hash = '#/facture/' + fid; };
+  const champ = (obj, k, label, type = 'text') => (
+    <label className="block text-sm"><span className="text-[11px] font-bold uppercase tracking-wider text-gray-500">{label}</span>
+      <input type={type} value={(c[obj] || {})[k] ?? ''} onChange={e => set(y => ({ [obj]: { ...y[obj], [k]: type === 'number' ? Math.max(0, parseInt(e.target.value) || 0) : e.target.value } }))} className="mt-0.5 w-full rounded-lg border border-gray-200 px-3 py-1.5" /></label>);
+  const fait = c.taches.filter(t => t.fait).length, pct = c.taches.length ? Math.round(fait / c.taches.length * 100) : 0;
+  return (
+    <Shell page="commandes">
+      <div className="mx-auto max-w-4xl space-y-4 px-4 pb-28 pt-5 sm:px-6">
+        <a href={'#/c/' + c.dossierId} className="text-sm font-medium text-gray-500 hover:text-ink">← {nomDossier(c.dossierId)}</a>
+        <div className="rounded-3xl bg-white p-5 ring-1 ring-black/5">
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div><h1 className="font-display text-2xl font-bold">Commande {c.numero}</h1><p className="text-sm text-gray-500">{c.titre} · devis {c.devisNumero} · créée le {jourCourt(c.creeLe)}</p></div>
+            <select value={c.statut} onChange={e => set({ statut: e.target.value, ...(e.target.value === 'livree' && !c.livreeLe ? { livreeLe: isoJour() } : {}) }, { action: 'statut commande : ' + e.target.value, ref: c.numero, dossierId: c.dossierId })}
+              className="rounded-lg border border-gray-200 px-3 py-2 text-sm font-semibold">{Object.entries(STATUTS_COMMANDE).map(([k, [l]]) => <option key={k} value={k}>{l}</option>)}</select>
+          </div>
+          <div className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-4">
+            {[['Création', eurC(c.netP)], ['Mensuel', c.netM ? eurC(c.netM) + '/mois' : '—'], ['Avancement', pct + ' %'], ['Facturé', eurC(fact.filter(x => x.statut !== 'brouillon').reduce((a, x) => a + (x.type === 'avoir' ? -x.totalTTC : x.totalTTC), 0))]].map(([l, v]) =>
+              <div key={l} className="rounded-xl bg-gray-50 px-3 py-2"><p className="text-[11px] font-bold uppercase tracking-wider text-gray-500">{l}</p><p className="tabular font-semibold">{v}</p></div>)}
+          </div>
+          <div className="mt-4 flex flex-wrap gap-2">
+            {c.netP > 0 && !acompteFait && !soldeFait && <button onClick={() => nouvelle('acompte')} className="rounded-xl bg-accent px-4 py-2 text-sm font-semibold text-white">Facturer l'acompte ({c.acomptePct || 30} %)</button>}
+            {c.netP > 0 && !soldeFait && <button onClick={() => nouvelle('solde')} className={'rounded-xl px-4 py-2 text-sm font-semibold ' + (acompteFait ? 'bg-accent text-white' : 'border border-gray-200')}>Facturer {acompteFait ? 'le solde' : 'la création'}</button>}
+            {c.netM > 0 && <button onClick={() => nouvelle('mensuel')} className="rounded-xl border border-gray-200 px-4 py-2 text-sm font-semibold">Facturer la mensualité</button>}
+            <button onClick={() => nouvelle('libre')} className="rounded-xl px-3 py-2 text-sm text-gray-500 hover:bg-gray-100">Facture libre</button>
+          </div>
+        </div>
+        <div className="grid gap-4 md:grid-cols-2">
+          <div className="rounded-2xl bg-white p-4 ring-1 ring-black/5">
+            <p className="font-semibold">Livraison</p>
+            <div className="mt-2 grid gap-2">
+              <label className="text-sm"><span className="text-[11px] font-bold uppercase tracking-wider text-gray-500">Livraison prévue</span><input type="date" value={c.livraisonPrevue || ''} onChange={e => set({ livraisonPrevue: e.target.value })} className="mt-0.5 w-full rounded-lg border border-gray-200 px-3 py-1.5" /></label>
+              <label className="text-sm"><span className="text-[11px] font-bold uppercase tracking-wider text-gray-500">Responsable</span><input value={c.responsable || ''} onChange={e => set({ responsable: e.target.value })} className="mt-0.5 w-full rounded-lg border border-gray-200 px-3 py-1.5" /></label>
+              <label className="text-sm"><span className="text-[11px] font-bold uppercase tracking-wider text-gray-500">Validation client le</span><input type="date" value={c.validationClient || ''} onChange={e => set({ validationClient: e.target.value }, e.target.value ? { action: 'validation client', ref: c.numero, dossierId: c.dossierId } : null)} className="mt-0.5 w-full rounded-lg border border-gray-200 px-3 py-1.5" /></label>
+              <label className="text-sm"><span className="text-[11px] font-bold uppercase tracking-wider text-gray-500">Livraison finale le</span><input type="date" value={c.livreeLe || ''} onChange={e => set({ livreeLe: e.target.value, ...(e.target.value ? { statut: 'livree' } : {}) }, e.target.value ? { action: 'livraison finale', ref: c.numero, dossierId: c.dossierId } : null)} className="mt-0.5 w-full rounded-lg border border-gray-200 px-3 py-1.5" /></label>
+            </div>
+          </div>
+          <div className="rounded-2xl bg-white p-4 ring-1 ring-black/5">
+            <p className="font-semibold">Tâches <span className="font-normal text-gray-500">{fait}/{c.taches.length}</span></p>
+            <ul className="mt-2 space-y-1.5">{c.taches.map(t => (
+              <li key={t.id} className="flex items-center gap-2 text-sm">
+                <input type="checkbox" checked={t.fait} onChange={() => set(y => ({ taches: y.taches.map(z => z.id === t.id ? { ...z, fait: !z.fait } : z) }))} className="h-5 w-5 accent-emerald-600" />
+                <span className={'flex-1 ' + (t.fait ? 'text-gray-400 line-through' : '')}>{t.texte}</span>
+                <input type="date" value={t.echeance || ''} onChange={e => set(y => ({ taches: y.taches.map(z => z.id === t.id ? { ...z, echeance: e.target.value } : z) }))} className="w-32 rounded border border-gray-200 px-1 py-0.5 text-xs" />
+                <button onClick={() => set(y => ({ taches: y.taches.filter(z => z.id !== t.id) }))} className="text-xs text-gray-300 hover:text-red-600" aria-label="Retirer">✕</button>
+              </li>))}</ul>
+            <div className="mt-2 flex gap-2"><input value={tache} onChange={e => setTache(e.target.value)} onKeyDown={e => { if (e.key === 'Enter' && tache.trim()) { set(y => ({ taches: [...y.taches, { id: nouvelId(), texte: tache.trim(), fait: false, echeance: '' }] })); setTache(''); } }} placeholder="Nouvelle tâche…" className="flex-1 rounded-lg border border-gray-200 px-3 py-1.5 text-sm" />
+              <button onClick={() => { if (!tache.trim()) return; set(y => ({ taches: [...y.taches, { id: nouvelId(), texte: tache.trim(), fait: false, echeance: '' }] })); setTache(''); }} className="rounded-lg bg-gray-100 px-3 text-sm font-semibold">+</button></div>
+          </div>
+          {c.site && <div className="rounded-2xl bg-white p-4 ring-1 ring-black/5"><p className="font-semibold">Site internet</p><div className="mt-2 grid gap-2 sm:grid-cols-2">
+            {champ('site', 'url', 'URL')}{champ('site', 'domaine', 'Nom de domaine')}{champ('site', 'hebergement', 'Hébergement')}{champ('site', 'maintenance', 'Maintenance')}{champ('site', 'miseEnLigne', 'Mise en ligne', 'date')}{champ('site', 'renouvellement', 'Renouvellement domaine', 'date')}</div></div>}
+          {c.social && <div className="rounded-2xl bg-white p-4 ring-1 ring-black/5"><p className="font-semibold">Réseaux sociaux</p><div className="mt-2 grid grid-cols-2 gap-2">
+            {champ('social', 'frequence', 'Fréquence (ex. 3 posts/sem.)')}{champ('social', 'prevues', 'Publications prévues', 'number')}{champ('social', 'produites', 'Contenus produits', 'number')}{champ('social', 'publiees', 'Contenus publiés', 'number')}</div></div>}
+          <div className="rounded-2xl bg-white p-4 ring-1 ring-black/5 md:col-span-2">
+            <p className="font-semibold">Prestations commandées</p>
+            <ul className="mt-2 divide-y divide-gray-100 text-sm">{c.lignes.map((x, i) => <li key={i} className="flex justify-between gap-3 py-1.5"><span>{x.nom}{x.qte > 1 ? ` × ${x.qte}` : ''}</span><span className="tabular text-gray-600">{eurC(x.pu * x.qte)}{x.type === 'mensuel' ? '/mois' : ''}</span></li>)}</ul>
+            {fact.length > 0 && <><p className="mt-4 font-semibold">Factures de la commande</p>
+              <ul className="mt-1 text-sm">{fact.map(x => <li key={x.id}><a href={'#/facture/' + x.id} className="flex items-center justify-between gap-3 py-1.5 hover:bg-gray-50"><span>{x.numero || 'Brouillon'} · {x.objet}</span><span className="flex items-center gap-2"><span className="tabular">{eurC(x.totalTTC)}</span><Badge k={etatFacture(x, f).statut} /></span></a></li>)}</ul></>}
+          </div>
+        </div>
+      </div>
+      <Toast msg={msg} />
+    </Shell>
+  );
+}
+
+function FormPaiement({ f, maj, dossierId, factureId, onFini, type = 'paiement' }) {
+  const ouvertes = f.factures.filter(x => x.type === 'facture' && x.statut !== 'brouillon' && (!dossierId || x.dossierId === dossierId) && (type === 'remboursement' ? etatFacture(x, f).trop > 0 : etatFacture(x, f).reste > 0));
+  const [fid, setFid] = useState(factureId || (ouvertes[0] || {}).id || '');
+  const fa = f.factures.find(x => x.id === fid), et = fa && etatFacture(fa, f);
+  const [montant, setMontant] = useState(et ? ((type === 'remboursement' ? et.trop : et.reste) / 100).toFixed(2) : '');
+  const [date, setDate] = useState(isoJour()), [mode, setMode] = useState('Virement'), [note, setNote] = useState('');
+  const valider = () => {
+    const m = cts(montant);
+    if (!fa) return alert('Choisissez une facture émise.');
+    if (m <= 0) return alert('Le montant doit être positif.');
+    const max = type === 'remboursement' ? et.trop : et.reste;
+    if (m > max && !confirm(`Le montant dépasse ${type === 'remboursement' ? 'le trop-perçu' : 'le reste dû'} (${eurC(max)}). Enregistrer quand même ?`)) return;
+    maj(x => { x.paiements = [...x.paiements, { id: nouvelId(), type, dossierId: fa.dossierId, factureId: fa.id, date, montant: m, mode, note, creeLe: new Date().toISOString() }]; },
+      { action: type === 'remboursement' ? 'remboursement' : 'paiement reçu', ref: fa.numero + ' · ' + eurC(m), dossierId: fa.dossierId });
+    onFini && onFini();
+  };
+  if (!ouvertes.length && !factureId) return <p className="text-sm text-gray-500">{type === 'remboursement' ? 'Aucun trop-perçu à rembourser.' : 'Aucune facture émise en attente de paiement.'}</p>;
+  return (
+    <div className="grid gap-2 sm:grid-cols-2">
+      <label className="text-sm sm:col-span-2"><span className="text-[11px] font-bold uppercase tracking-wider text-gray-500">Facture</span>
+        <select value={fid} onChange={e => { setFid(e.target.value); const y = f.factures.find(z => z.id === e.target.value); if (y) { const e2 = etatFacture(y, f); setMontant(((type === 'remboursement' ? e2.trop : e2.reste) / 100).toFixed(2)); } }} className="mt-0.5 w-full rounded-lg border border-gray-200 px-3 py-2">
+          {(factureId && !ouvertes.some(o => o.id === factureId) ? [fa, ...ouvertes] : ouvertes).filter(Boolean).map(x => <option key={x.id} value={x.id}>{x.numero} · {nomDossier(x.dossierId)} · reste {eurC(etatFacture(x, f).reste)}</option>)}
+        </select></label>
+      <label className="text-sm"><span className="text-[11px] font-bold uppercase tracking-wider text-gray-500">Montant (€)</span><input type="number" step="0.01" min="0" value={montant} onChange={e => setMontant(e.target.value)} className="mt-0.5 w-full rounded-lg border border-gray-200 px-3 py-2 text-right" /></label>
+      <label className="text-sm"><span className="text-[11px] font-bold uppercase tracking-wider text-gray-500">Date</span><input type="date" value={date} onChange={e => setDate(e.target.value)} className="mt-0.5 w-full rounded-lg border border-gray-200 px-3 py-2" /></label>
+      <label className="text-sm"><span className="text-[11px] font-bold uppercase tracking-wider text-gray-500">Mode</span><select value={mode} onChange={e => setMode(e.target.value)} className="mt-0.5 w-full rounded-lg border border-gray-200 px-3 py-2">{MODES_PAIEMENT.map(m => <option key={m}>{m}</option>)}</select></label>
+      <label className="text-sm"><span className="text-[11px] font-bold uppercase tracking-wider text-gray-500">Note</span><input value={note} onChange={e => setNote(e.target.value)} placeholder="Réf. virement…" className="mt-0.5 w-full rounded-lg border border-gray-200 px-3 py-2" /></label>
+      <button onClick={valider} className="rounded-xl bg-emerald-600 py-2.5 text-sm font-semibold text-white sm:col-span-2">{type === 'remboursement' ? 'Enregistrer le remboursement' : 'Enregistrer le paiement'}</button>
+    </div>
+  );
+}
+
+function PageFactures() {
+  const [f, maj] = useFinance();
+  const [onglet, setOnglet] = useState('factures'), [filtre, setFiltre] = useState('tous'), [ajout, setAjout] = useState(false);
+  const factures = [...f.factures].sort((a, b) => (b.dateEmission || b.creeLe).localeCompare(a.dateEmission || a.creeLe));
+  const etats = factures.map(x => ({ x, e: etatFacture(x, f) }));
+  const emises = etats.filter(({ x }) => x.statut !== 'brouillon');
+  const facture = emises.reduce((a, { x }) => a + (x.type === 'avoir' ? -x.totalTTC : x.totalTTC), 0);
+  const encaisse = f.paiements.reduce((a, p) => a + (p.type === 'remboursement' ? -p.montant : p.montant), 0);
+  const reste = emises.filter(({ x }) => x.type === 'facture').reduce((a, { e }) => a + e.reste, 0);
+  const retard = emises.filter(({ e }) => e.statut === 'retard');
+  const soldes = soldesClients(f);
+  const liste = etats.filter(({ e }) => filtre === 'tous' || e.statut === filtre || (filtre === 'apayer' && ['emise', 'envoyee', 'partielle', 'retard'].includes(e.statut)));
+  return (
+    <Shell page="factures">
+      <div className="mx-auto max-w-5xl space-y-4 px-4 pb-28 pt-6 sm:px-6">
+        <h1 className="font-display text-2xl font-bold sm:text-3xl">Factures et paiements</h1>
+        <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+          <Tuile titre="Facturé" val={eurC(facture)} sous="factures émises − avoirs" />
+          <Tuile titre="Encaissé" val={eurC(encaisse)} sous="paiements − remboursements" cls="bg-emerald-50 text-emerald-900" />
+          <Tuile titre="Reste à encaisser" val={eurC(reste)} sous="sur les factures émises" cls="bg-amber-50 text-amber-900" />
+          <Tuile titre="En retard" val={retard.length} sous={eurC(retard.reduce((a, { e }) => a + e.reste, 0)) + ' échu(s)'} cls={retard.length ? 'bg-red-50 text-red-900' : 'bg-white'} />
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          {[['factures', 'Factures'], ['paiements', 'Paiements'], ['soldes', 'Soldes clients'], ['journal', 'Journal']].map(([k, l]) => <button key={k} onClick={() => setOnglet(k)} className={'rounded-xl px-4 py-2 text-sm font-semibold ' + (onglet === k ? 'bg-ink text-white' : 'bg-white ring-1 ring-gray-200')}>{l}</button>)}
+          {onglet === 'paiements' && <button onClick={() => setAjout(!ajout)} className="ml-auto rounded-xl bg-emerald-600 px-4 py-2 text-sm font-semibold text-white">+ Paiement reçu</button>}
+        </div>
+        {onglet === 'factures' && <>
+          <div className="-mx-1 flex gap-1.5 overflow-x-auto px-1">{[['tous', 'Toutes'], ['apayer', 'À encaisser'], ['retard', 'En retard'], ['brouillon', 'Brouillons'], ['payee', 'Payées'], ['avoir', 'Avoirs']].map(([k, l]) =>
+            <button key={k} onClick={() => setFiltre(k)} className={'shrink-0 rounded-full px-3 py-1.5 text-[13px] font-semibold ' + (filtre === k ? 'bg-ink text-white' : 'bg-white text-gray-600 ring-1 ring-gray-200')}>{l}</button>)}</div>
+          {liste.length ? <div className="divide-y divide-gray-100 overflow-hidden rounded-2xl bg-white ring-1 ring-black/5">{liste.map(({ x, e }) => (
+            <a key={x.id} href={'#/facture/' + x.id} className="flex flex-wrap items-center gap-x-4 gap-y-1 px-4 py-3 hover:bg-gray-50">
+              <span className="w-32 font-semibold">{x.numero || 'Brouillon'}</span>
+              <span className="min-w-0 flex-1"><span className="block truncate">{nomDossier(x.dossierId)}</span><span className="block truncate text-xs text-gray-500">{x.objet}</span></span>
+              <span className="text-xs text-gray-500">{x.dateEcheance ? 'éch. ' + jourCourt(x.dateEcheance) : ''}</span>
+              <span className="tabular w-28 text-right font-semibold">{x.type === 'avoir' ? '−' : ''}{eurC(x.totalTTC)}</span>
+              <Badge k={e.statut} />
+            </a>))}</div> : <div className="rounded-2xl border border-dashed border-gray-300 p-8 text-center text-sm text-gray-500">Aucune facture ici. Les factures se créent depuis une commande (acompte, solde, mensualité).</div>}
+        </>}
+        {onglet === 'paiements' && <>
+          {ajout && <div className="rounded-2xl bg-white p-4 ring-1 ring-black/5"><FormPaiement f={f} maj={maj} onFini={() => setAjout(false)} /></div>}
+          {f.paiements.length ? <div className="divide-y divide-gray-100 overflow-hidden rounded-2xl bg-white ring-1 ring-black/5">{[...f.paiements].sort((a, b) => b.date.localeCompare(a.date)).map(p => {
+            const fa = f.factures.find(x => x.id === p.factureId);
+            return <div key={p.id} className="flex flex-wrap items-center gap-x-4 px-4 py-3 text-sm"><span className="w-20 text-gray-500">{jourCourt(p.date)}</span><span className="min-w-0 flex-1 truncate">{nomDossier(p.dossierId)} · {fa ? fa.numero : '—'} · {p.mode}{p.note ? ' · ' + p.note : ''}</span>
+              <span className={'tabular font-semibold ' + (p.type === 'remboursement' ? 'text-red-600' : 'text-emerald-700')}>{p.type === 'remboursement' ? '− ' : '+ '}{eurC(p.montant)}</span></div>; })}</div>
+            : <p className="text-sm text-gray-500">Aucun paiement enregistré.</p>}
+        </>}
+        {onglet === 'soldes' && (Object.keys(soldes).length ? <div className="divide-y divide-gray-100 overflow-hidden rounded-2xl bg-white ring-1 ring-black/5">
+          <div className="hidden grid-cols-5 gap-2 px-4 py-2 text-[11px] font-bold uppercase tracking-wider text-gray-500 sm:grid"><span className="col-span-2">Client</span><span className="text-right">Facturé</span><span className="text-right">Encaissé</span><span className="text-right">Solde</span></div>
+          {Object.entries(soldes).sort((a, b) => b[1].solde - a[1].solde).map(([did, x]) => (
+            <a key={did} href={'#/c/' + did} className="grid grid-cols-2 gap-2 px-4 py-3 text-sm hover:bg-gray-50 sm:grid-cols-5"><span className="col-span-2 font-medium">{nomDossier(did)}{x.retard > 0 && <span className="ml-2 text-xs font-semibold text-red-600">⚠ {eurC(x.retard)} en retard</span>}</span>
+              <span className="tabular text-right">{eurC(x.facture)}</span><span className="tabular text-right text-emerald-700">{eurC(x.encaisse)}</span><span className={'tabular text-right font-semibold ' + (x.solde > 0 ? 'text-amber-700' : x.solde < 0 ? 'text-red-600' : '')}>{eurC(x.solde)}</span></a>))}
+        </div> : <p className="text-sm text-gray-500">Aucune facture émise pour l'instant.</p>)}
+        {onglet === 'journal' && <div className="rounded-2xl bg-white p-4 ring-1 ring-black/5"><p className="text-xs text-gray-500">Toutes les opérations financières, dans l'ordre. Rien n'y est effacé.</p>
+          <ul className="mt-2 max-h-[60vh] space-y-1 overflow-y-auto text-[13px]">{[...(f.journal || [])].reverse().map((j, i) => <li key={i} className="flex gap-3"><span className="w-36 shrink-0 text-gray-400">{new Date(j.date).toLocaleString('fr-FR', { dateStyle: 'short', timeStyle: 'short' })}</span><span>{j.action} · {j.ref}{j.dossierId ? ' · ' + nomDossier(j.dossierId) : ''}</span></li>)}</ul></div>}
+        <p className="text-[11px] text-gray-400">Outil d'aide à la facturation : numérotation continue, factures émises non modifiables, corrections par avoir. Ce n'est pas un logiciel de comptabilité certifié ; faites valider vos obligations par votre comptable.</p>
+      </div>
+    </Shell>
+  );
+}
+
+function PageFacture({ id }) {
+  const [f, maj] = useFinance();
+  const fa = f.factures.find(x => x.id === id);
+  const [paiement, setPaiement] = useState(false), [rembours, setRembours] = useState(false), [msg, setMsg] = useState('');
+  if (!fa) return <Shell page="factures"><div className="p-8 text-center text-gray-500">Facture introuvable. <a href="#/factures" className="underline">Retour</a></div></Shell>;
+  const toast = (m) => { setMsg(m); setTimeout(() => setMsg(''), 4000); };
+  const e = etatFacture(fa, f), brouillon = fa.statut === 'brouillon';
+  const st = load(lireJSON(DK(fa.dossierId)) || {});
+  const cl = st.client || {}, vi = vendeurInfo((lireJSON(IDX) || {}).vendeur || st.vendeur || {});
+  FRANCHISE = num(fa.tva) === 0;
+  const setF = (patch) => maj(x => { x.factures = x.factures.map(y => { if (y.id !== id) return y; if (y.statut !== 'brouillon') return y; const n = { ...y, ...patch }; return { ...n, ...totauxFacture(n) }; }); });
+  const setLigne = (i, patch) => setF({ lignes: fa.lignes.map((l, j) => j === i ? { ...l, ...patch } : l) });
+  const emettre = () => {
+    if (!fa.lignes.length || fa.totalTTC === 0 && fa.type === 'facture') return alert('La facture est vide.');
+    if (fa.lignes.some(l => !String(l.designation || '').trim())) return alert('Chaque ligne doit avoir une désignation.');
+    if (!vi.siret || !(lireJSON(IDX) || {}).vendeur?.adresse) { if (!confirm('Votre SIRET ou votre adresse manque dans « Vos coordonnées » : ce sont des mentions obligatoires. Émettre quand même ?')) return; }
+    if (!confirm(`Émettre la ${fa.type === 'avoir' ? 'note d\'avoir' : 'facture'} ?\n\nElle reçoit un numéro définitif et ne pourra plus être modifiée (seulement corrigée par un avoir).`)) return;
+    maj(x => { x.factures = x.factures.map(y => y.id !== id ? y : { ...y, statut: 'emise', numero: prochainNumero(x, y.type === 'avoir' ? 'avoir' : 'facture'), dateEmission: isoJour(),
+      dateEcheance: y.dateEcheance || (y.type === 'avoir' ? '' : (() => { const d = new Date(); d.setDate(d.getDate() + 30); return isoJour(d); })()), emiseLe: new Date().toISOString(),
+      vendeur: (lireJSON(IDX) || {}).vendeur || st.vendeur, client: cl, journal: [...(y.journal || []), { date: new Date().toISOString(), texte: 'Émise' }] }); }, { action: fa.type === 'avoir' ? 'avoir émis' : 'facture émise', ref: fa.objet, dossierId: fa.dossierId });
+    toast('Émise. Elle est maintenant figée.');
+  };
+  const supprimerBrouillon = () => { if (!confirm('Supprimer ce brouillon ?')) return; maj(x => { x.factures = x.factures.filter(y => y.id !== id); }, { action: 'brouillon supprimé', ref: fa.objet, dossierId: fa.dossierId }); location.hash = '#/factures'; };
+  const avoir = () => {
+    const max = e.du; const v = prompt(`Montant de l'avoir (€), au maximum ${eurC(max)} :`, (max / 100).toFixed(2)); if (v === null) return;
+    const m = cts(v); if (m <= 0 || m > max) return alert('Montant invalide.');
+    const motif = prompt('Motif de l\'avoir (erreur, geste commercial, annulation…) :', m === max ? 'Annulation de la facture' : 'Geste commercial'); if (motif === null) return;
+    const aid = maj(x => { const a = { id: nouvelId(), type: 'avoir', numero: '', statut: 'brouillon', dossierId: fa.dossierId, commandeId: fa.commandeId, factureOrigine: fa.id, objet: `Avoir sur la facture ${fa.numero} : ${motif}`,
+      lignes: [{ designation: `${motif} (facture ${fa.numero} du ${jourCourt(fa.dateEmission)})`, qte: 1, pu: Math.round(m / (1 + num(fa.tva) / 100)) }], tva: fa.tva, creeLe: new Date().toISOString(), journal: [{ date: new Date().toISOString(), texte: 'Brouillon d\'avoir créé' }] };
+      Object.assign(a, totauxFacture(a)); x.factures = [...x.factures, a]; return a.id; }, { action: 'brouillon d\'avoir', ref: fa.numero, dossierId: fa.dossierId });
+    location.hash = '#/facture/' + aid;
+  };
+  const origine = fa.factureOrigine && f.factures.find(x => x.id === fa.factureOrigine);
+  const paiements = f.paiements.filter(p => p.factureId === id);
+  const vend = fa.vendeur ? vendeurInfo(fa.vendeur) : vi, cli = fa.client || cl, adrV = (fa.vendeur || (lireJSON(IDX) || {}).vendeur || {}).adresse;
+  return (
+    <Shell page="factures">
+      <div className="no-print mx-auto max-w-4xl space-y-3 px-4 pt-5 sm:px-6">
+        <a href={'#/c/' + fa.dossierId} className="text-sm font-medium text-gray-500 hover:text-ink">← {nomDossier(fa.dossierId)}</a>
+        <div className="flex flex-wrap items-center gap-2 rounded-2xl bg-white p-3 ring-1 ring-black/5">
+          <Badge k={e.statut} /><span className="text-sm text-gray-600">{brouillon ? 'Modifiable tant qu\'elle n\'est pas émise.' : e.statut === 'annulee' ? 'Annulée par avoir.' : fa.type === 'avoir' ? `Avoir sur ${origine ? origine.numero : 'facture'}` : `Payé ${eurC(e.paye)} · reste ${eurC(e.reste)}`}</span>
+          <div className="ml-auto flex flex-wrap gap-2">
+            {brouillon && <><button onClick={supprimerBrouillon} className="rounded-xl px-3 py-2 text-sm text-gray-500 hover:bg-gray-100">Supprimer</button><button onClick={emettre} className="rounded-xl bg-accent px-4 py-2 text-sm font-semibold text-white">Émettre</button></>}
+            {!brouillon && fa.type === 'facture' && fa.statut === 'emise' && <button onClick={() => maj(x => { x.factures = x.factures.map(y => y.id === id ? { ...y, statut: 'envoyee', journal: [...(y.journal || []), { date: new Date().toISOString(), texte: 'Marquée envoyée' }] } : y); }, { action: 'facture envoyée', ref: fa.numero, dossierId: fa.dossierId })} className="rounded-xl border border-gray-200 px-3 py-2 text-sm font-medium">Marquer envoyée</button>}
+            {!brouillon && fa.type === 'facture' && e.reste > 0 && <button onClick={() => setPaiement(!paiement)} className="rounded-xl bg-emerald-600 px-4 py-2 text-sm font-semibold text-white">+ Paiement</button>}
+            {!brouillon && fa.type === 'facture' && e.trop > 0 && <button onClick={() => setRembours(!rembours)} className="rounded-xl border border-red-200 px-3 py-2 text-sm font-medium text-red-700">Rembourser {eurC(e.trop)}</button>}
+            {!brouillon && fa.type === 'facture' && e.du > 0 && <button onClick={avoir} className="rounded-xl border border-gray-200 px-3 py-2 text-sm font-medium">Créer un avoir</button>}
+            {!brouillon && <button onClick={() => window.print()} className="rounded-xl bg-ink px-4 py-2 text-sm font-semibold text-white">PDF</button>}
+          </div>
+        </div>
+        {paiement && <div className="rounded-2xl bg-white p-4 ring-1 ring-black/5"><FormPaiement f={f} maj={maj} factureId={id} onFini={() => { setPaiement(false); toast('Paiement enregistré.'); }} /></div>}
+        {rembours && <div className="rounded-2xl bg-white p-4 ring-1 ring-black/5"><FormPaiement f={f} maj={maj} factureId={id} type="remboursement" onFini={() => { setRembours(false); toast('Remboursement enregistré.'); }} /></div>}
+      </div>
+      <div className="px-4 sm:px-6">
+      <article id="proposal" className="mx-auto mb-28 mt-3 max-w-4xl bg-white px-6 py-8 text-[13.5px] leading-relaxed ring-1 ring-black/5 sm:rounded-2xl sm:px-10">
+        <header className="flex flex-wrap items-start justify-between gap-6">
+          <div className="text-[13px] text-gray-600"><p className="text-base font-semibold text-ink">{vend.societe || vend.nom}</p>{vend.societe && <p>{vend.nom}</p>}<p>{vend.statut}</p>{adrV && <p>{adrV}</p>}<p>{[vend.tel, vend.email].filter(Boolean).join(' · ')}</p>{vend.siret && <p>SIRET {vend.siret}</p>}</div>
+          <div className="text-right"><p className="font-display text-3xl font-semibold">{fa.type === 'avoir' ? 'Avoir' : fa.nature === 'acompte' ? 'Facture d\'acompte' : 'Facture'}</p>
+            <p className="tabular text-[13px] text-gray-600">N° {fa.numero || '(brouillon, non numérotée)'}<br />Date : {fa.dateEmission ? fmtDate(new Date(fa.dateEmission + 'T12:00')) : '—'}{fa.type === 'facture' && <><br />Échéance : {fa.dateEcheance ? fmtDate(new Date(fa.dateEcheance + 'T12:00')) : 'à 30 jours'}</>}{origine && <><br />Facture d'origine : {origine.numero}</>}</p></div>
+        </header>
+        <div className="mt-5 rounded-xl bg-gray-50 px-4 py-3 text-[13px]"><p className="text-[11px] font-bold uppercase tracking-wider text-gray-500">Client</p><p className="font-semibold">{cli.entreprise}</p><p className="text-gray-600">{[cli.responsable, cli.adresse].filter(Boolean).join(' · ')}</p></div>
+        <p className="mt-4 font-semibold">{fa.objet}</p>
+        <table className="mt-2 w-full text-[13px]"><thead><tr className="border-b-2 border-ink text-left text-[11px] uppercase tracking-wide text-gray-600"><th className="py-2">Désignation</th><th className="w-14 py-2 text-right">Qté</th><th className="w-28 py-2 text-right">{FRANCHISE ? 'PU' : 'PU HT'}</th><th className="w-28 py-2 text-right">{FRANCHISE ? 'Total' : 'Total HT'}</th>{brouillon && <th className="no-print w-6" />}</tr></thead>
+          <tbody className="tabular">{fa.lignes.map((l, i) => <tr key={i} className="border-b border-gray-100 align-top">
+            <td className="py-1.5 pr-2">{brouillon ? <input value={l.designation} onChange={ev => setLigne(i, { designation: ev.target.value })} placeholder="Désignation" className="w-full rounded border border-gray-200 px-2 py-1" /> : l.designation}</td>
+            <td className="py-1.5 text-right">{brouillon ? <input type="number" min="0" value={l.qte} onChange={ev => setLigne(i, { qte: ev.target.value })} className="w-14 rounded border border-gray-200 px-1 py-1 text-right" /> : l.qte}</td>
+            <td className="py-1.5 text-right">{brouillon ? <input type="number" step="0.01" value={(l.pu / 100).toFixed(2)} onChange={ev => setLigne(i, { pu: cts(ev.target.value) })} className="w-24 rounded border border-gray-200 px-1 py-1 text-right" /> : eurC(l.pu)}</td>
+            <td className="py-1.5 text-right">{eurC(Math.round(num(l.qte || 1) * l.pu))}</td>
+            {brouillon && <td className="no-print py-1.5 text-right"><button onClick={() => setF({ lignes: fa.lignes.filter((_, j) => j !== i) })} className="text-gray-300 hover:text-red-600">✕</button></td>}</tr>)}</tbody></table>
+        {brouillon && <button onClick={() => setF({ lignes: [...fa.lignes, { designation: '', qte: 1, pu: 0 }] })} className="no-print mt-2 text-sm font-medium text-gray-500 underline">+ Ajouter une ligne</button>}
+        <div className="ml-auto mt-4 w-full max-w-[300px] space-y-0.5 text-[13px]">
+          {!FRANCHISE && <><div className="flex justify-between"><span>Total HT</span><span className="tabular">{eurC(fa.totalHT)}</span></div><div className="flex justify-between text-gray-600"><span>TVA {fa.tva} %</span><span className="tabular">{eurC(fa.totalTVA)}</span></div></>}
+          <div className="flex justify-between rounded-lg bg-ink px-3 py-2 font-semibold text-white"><span>{fa.type === 'avoir' ? 'Montant de l\'avoir' : FRANCHISE ? 'Net à payer' : 'Total TTC'}</span><span className="tabular">{eurC(fa.totalTTC)}</span></div>
+          {FRANCHISE && <p className="text-right text-[11px] text-gray-500">{MENTION_TVA}</p>}
+          {!brouillon && fa.type === 'facture' && e.paye > 0 && <><div className="flex justify-between text-emerald-700"><span>Déjà réglé</span><span className="tabular">− {eurC(e.paye)}</span></div><div className="flex justify-between font-semibold"><span>Reste dû</span><span className="tabular">{eurC(e.reste)}</span></div></>}
+        </div>
+        {brouillon && fa.type === 'facture' && <label className="no-print mt-3 block text-sm">Échéance <input type="date" value={fa.dateEcheance || ''} onChange={ev => setF({ dateEcheance: ev.target.value })} className="ml-2 rounded border border-gray-200 px-2 py-1" /> <span className="text-xs text-gray-500">(vide = 30 jours après l'émission)</span></label>}
+        {fa.type === 'facture' && <div className="mt-6 border-t border-gray-200 pt-3 text-[11.5px] text-gray-600">
+          <p>Règlement à réception, au plus tard à la date d'échéance, par virement{vend.tel ? '' : ''}. Pas d'escompte pour paiement anticipé.</p>
+          <p>En cas de retard de paiement : pénalités au taux de 3 fois le taux d'intérêt légal, et indemnité forfaitaire pour frais de recouvrement de 40 € (art. L441-10 du Code de commerce).</p>
+          {FRANCHISE && <p>{MENTION_TVA}.</p>}
+        </div>}
+        {paiements.length > 0 && <div className="no-print mt-5 text-sm"><p className="font-semibold">Règlements</p>{paiements.map(p => <p key={p.id} className="text-gray-600">{jourCourt(p.date)} · {p.mode} · {p.type === 'remboursement' ? '− ' : ''}{eurC(p.montant)}{p.note ? ' · ' + p.note : ''}</p>)}</div>}
+        {(fa.journal || []).length > 0 && <div className="no-print mt-4 text-xs text-gray-400">Historique : {fa.journal.map(j => `${jourCourt(j.date)} ${j.texte}`).join(' · ')}</div>}
+      </article>
       </div>
       <Toast msg={msg} />
     </Shell>
@@ -2968,7 +3408,7 @@ function App({ dossierId }) {
               <div>
                 <p className="mb-3 text-xs font-medium uppercase tracking-wide text-gray-500">Vos coordonnées (conservées d'un client à l'autre)</p>
                 <div className="grid gap-4 sm:grid-cols-2">
-                  {[['civilite', 'Civilité (M., Mme)'], ['nom', 'Votre nom'], ['societe', 'Votre société (ou votre nom complet)'], ['statut', 'Statut (ex. Entrepreneur individuel (EI))'], ['telephone', 'Téléphone'], ['email', 'Email'], ['siret', 'SIRET']].map(([k, l]) => (
+                  {[['civilite', 'Civilité (M., Mme)'], ['nom', 'Votre nom'], ['societe', 'Votre société (ou votre nom complet)'], ['statut', 'Statut (ex. Entrepreneur individuel (EI))'], ['adresse', 'Adresse professionnelle (obligatoire sur les factures)'], ['telephone', 'Téléphone'], ['email', 'Email'], ['siret', 'SIRET']].map(([k, l]) => (
                     <Field key={k} label={l}><input className={inputCls} value={s.vendeur[k] ?? DEFAULTS.vendeur[k]} onChange={e => setVendeur(k, e.target.value)} /></Field>
                   ))}
                 </div>
