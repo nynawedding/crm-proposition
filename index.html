@@ -69,8 +69,8 @@ const OFFRE_PAR_DEFAUT = {
 
 const CATALOGUE = [
   { id: 'site', type: 'ponctuel', nom: 'Création de site internet', description: "Site vitrine responsive (5 à 8 pages), design sur mesure, formulaire de contact, optimisé mobile.", prix: 1490, qte: 1, unite: 'site' },
-  { id: 'tournage', type: 'ponctuel', nom: 'Tournage photo et vidéo sur place', description: "Une demi-journée dans votre boutique : vos produits, vos gestes, votre équipe et l'ambiance.", prix: 390, qte: 1, unite: 'demi-journée' },
-  { id: 'montage', type: 'ponctuel', nom: 'Montage vidéo', description: "Vidéos courtes montées, avec musique et textes, au bon format pour vos écrans et vos réseaux.", prix: 150, qte: 3, unite: 'vidéo' },
+  { id: 'tournage', type: 'ponctuel', nom: 'Tournage photo et vidéo sur place', description: "Une journée dans votre boutique : vos produits, vos gestes, votre équipe et l'ambiance, en photo et en vidéo.", prix: 600, qte: 1, unite: 'journée' },
+  { id: 'montage', type: 'ponctuel', nom: 'Montage vidéo', description: "Une journée de montage : choix des meilleures prises, montage, musique, textes, et export aux formats de vos écrans et réseaux.", prix: 450, qte: 1, unite: 'journée' },
   { id: 'retouche', type: 'ponctuel', nom: 'Retouche photo', description: "Sélection et retouche professionnelle des meilleures photos (lumière, couleurs, cadrage). Lot de 20 photos.", prix: 120, qte: 1, unite: 'lot de 20' },
   { id: 'ecrans', type: 'ponctuel', nom: 'Contenus pour vos écrans en boutique', description: "Montage d'une boucle photo et vidéo au format de vos écrans (horizontal ou vertical), livrée prête à diffuser.", prix: 290, qte: 1, unite: 'boucle' },
   { id: 'seo', type: 'ponctuel', nom: 'SEO et référencement local', description: "Audit, mots-clés locaux, optimisation des pages et des balises, inscription aux annuaires clés.", prix: 390, qte: 1, unite: 'forfait' },
@@ -176,7 +176,12 @@ const load = () => {
       return { ...p, ...st, offre: valide(st.offre) ? st.offre : p.offre };
     });
     // seules les prestations créées à la main sont gardées en plus du catalogue
-    const extras = (s.prestations || []).filter(x => String(x.id).startsWith('perso-')).map(x => ({ ...x, offre: valide(x.offre) ? x.offre : 'base' }));
+    const anciennes = { shooting: 'base', video: 'base' }; // prestations des versions précédentes, gardées avec vos prix
+    const extras = (s.prestations || [])
+      .filter(x => String(x.id).startsWith('perso-') || anciennes[x.id])
+      .map(x => anciennes[x.id] ? { ...x, id: 'perso-' + x.id } : x)
+      .filter((x, i, arr) => arr.findIndex(y => y.id === x.id) === i)
+      .map(x => ({ ...x, offre: valide(x.offre) ? x.offre : 'base' }));
     // noms d'offres personnalisés gardés seulement s'ils datent de la version actuelle des offres
     const offres = OFFRES.map(o => ({ ...o, ...((s.offres || []).find(x => x.id === o.id && x.v === o.v) || {}) }));
     // une seule fois : si la fiche enregistrée est vide, on y met le client préenregistré
@@ -219,6 +224,19 @@ const waNumber = (tel) => {
   return d;
 };
 
+// « 1 journée », « 2 journées », « 3 × lot de 20 »
+const UNITES_MUETTES = ['', 'mois', 'forfait', 'site', 'boucle'];
+const qteTexte = (p) => {
+  const q = Math.max(1, num(p.qte) || 1), u = (p.unite || '').trim();
+  if (q === 1 && UNITES_MUETTES.includes(u.toLowerCase())) return '';
+  if (!u) return `${q}`;
+  if (q === 1) return `1 ${u}`;
+  return /^[a-zàâéèêîôûç-]+$/i.test(u) && !/s$/.test(u) ? `${q} ${u}s` : `${q} × ${u}`;
+};
+
+// pour les listes : « × 3 » quand il n'y a pas d'unité
+const qteLabel = (p) => { const t = qteTexte(p); return /^\d+$/.test(t) ? '× ' + t : t; };
+
 /* ============================ Calculs ============================ */
 function compute(s) {
   const sel = s.prestations.filter(p => p.selected);
@@ -247,7 +265,7 @@ function compute(s) {
     const oHtP = bP * kP, oHtM = bM * kM;
     const oTtcP = oHtP * (1 + t), oTtcM = oHtM * (1 + t);
     const oAcompte = s.acompte.actif ? oTtcP * num(s.acompte.pct) / 100 : 0;
-    return { ...o, items, htP: oHtP, htM: oHtM, ttcP: oTtcP, ttcM: oTtcM, acompte: oAcompte,
+    return { ...o, items, bP, bM, htP: oHtP, htM: oHtM, ttcP: oTtcP, ttcM: oTtcM, acompte: oAcompte,
       totalTTC: oTtcP + oTtcM * moisCalc, totalHT: oHtP + oHtM * moisCalc };
   }).filter(o => o.items.length);
   return { sel, ponct, mens, line, brutP, brutM, remP, remM, htP, htM, ttcP, ttcM, tvaP: ttcP - htP, tvaM: ttcM - htM,
@@ -338,6 +356,11 @@ function PrestationCard({ p, suggested, onChange, onRemove, offres }) {
           <input type="number" inputMode="numeric" min="1" step="1" value={p.qte} onChange={e => onChange({ qte: e.target.value })}
             className={inputCls + ' tabular py-2'} />
         </label>
+        <label className="w-32">
+          <span className="mb-1 block text-[11px] uppercase tracking-wide text-gray-500">Unité</span>
+          <input value={p.unite || ''} onChange={e => onChange({ unite: e.target.value })} placeholder="journée…"
+            className={inputCls + ' py-2 text-sm'} />
+        </label>
         <label className="min-w-[150px]">
           <span className="mb-1 block text-[11px] uppercase tracking-wide text-gray-500">Dans l'offre</span>
           <select value={p.offre || 'base'} onChange={e => onChange({ offre: e.target.value })}
@@ -373,7 +396,7 @@ function buildText(s, c, numero) {
   c.offres.forEach((o, i) => {
     L.push('');
     L.push(`${i === 0 && o.id === 'base' ? '★' : '+'} ${o.nom.toUpperCase()} : ${prixOffre(o, c)}`);
-    o.items.forEach(p => L.push(`   ✓ ${p.nom}${num(p.qte) > 1 ? ' × ' + p.qte : ''}`));
+    o.items.forEach(p => L.push(`   ✓ ${p.nom}${qteLabel(p) ? ' (' + qteLabel(p) + ')' : ''}`));
   });
   if (c.offres.length > 1) {
     L.push('');
@@ -419,7 +442,7 @@ function OffreCard({ o, i, c, principale }) {
           <li key={p.id} className="flex gap-3 py-3">
             <Check />
             <div className="min-w-0 flex-1">
-              <p className="font-semibold leading-snug">{p.nom}{num(p.qte) > 1 && <span className="font-normal text-gray-500"> × {p.qte}</span>}</p>
+              <p className="font-semibold leading-snug">{p.nom}{qteLabel(p) && <span className="font-normal text-gray-500"> · {qteLabel(p)}</span>}</p>
               <p className="text-sm leading-snug text-gray-600">{p.description}</p>
             </div>
             {p.type === 'mensuel' && <span className="h-fit shrink-0 rounded-full bg-sky-50 px-2.5 py-1 text-[11px] font-semibold text-sky-800">chaque mois</span>}
@@ -565,31 +588,63 @@ function Proposal({ s, c, numero, onClose, toast }) {
           </section>
         )}
 
-        {/* 4. Détail pour la comptabilité */}
-        <section className="avoid-break mt-10 border-t border-gray-200 pt-8">
-          <h2 className="font-display text-lg font-semibold">Détail du prix (toutes offres)</h2>
-          <div className="mt-3 grid gap-6 text-sm sm:grid-cols-2">
-            {c.ponct.length > 0 && (
-              <div>
-                <p className="mb-1 font-semibold">Une seule fois</p>
-                {c.ponct.map(p => <Line key={p.id} l={p.nom + (num(p.qte) > 1 ? ` × ${p.qte}` : '')} v={eur(c.line(p)) + ' HT'} />)}
-                {c.remP > 0 && <Line minus l={'Remise' + (s.remises.ponctuel.mode === '%' ? ` ${s.remises.ponctuel.valeur} %` : '')} v={'− ' + eur(c.remP) + ' HT'} />}
-                <div className="mt-1 border-t border-gray-200 pt-1">
-                  <Line l="Total HT" v={eur(c.htP)} /><Line l={`TVA ${s.tva} %`} v={eur(c.tvaP)} /><Line strong l="Total TTC" v={eur(c.ttcP)} />
+        {/* 4. Détail du prix, bloc par bloc */}
+        <section className="mt-10 border-t border-gray-200 pt-8">
+          <h2 className="font-display text-2xl font-semibold">Détail du prix</h2>
+          <p className="mt-1 text-sm text-gray-500">Bloc par bloc : chaque prestation, sa quantité et son prix unitaire (HT), puis le total du bloc.</p>
+          <div className="mt-5 space-y-5">
+            {c.offres.map((o, i) => {
+              const remP = o.bP - o.htP, remM = o.bM - o.htM;
+              const unit = (p) => qteTexte(p) ? `${qteTexte(p)} × ${eur(num(p.prix))}` : '';
+              return (
+                <div key={o.id} className="avoid-break overflow-hidden rounded-2xl border border-gray-200">
+                  <p className="bg-gray-50 px-4 py-3 font-semibold sm:px-5">{o.id === 'base' ? '★ ' : (i ? i + '. ' : '')}{o.nom}</p>
+                  <table className="w-full text-[13px] sm:text-sm">
+                    <tbody className="tabular divide-y divide-gray-100">
+                      {o.items.map(p => (
+                        <tr key={p.id} className="align-top">
+                          <td className="px-4 py-2.5 sm:px-5">
+                            <span className="text-ink">{p.nom}</span>
+                            {unit(p) && <span className="block text-gray-500">{unit(p)}</span>}
+                          </td>
+                          <td className="whitespace-nowrap px-4 py-2.5 text-right sm:px-5">{eur(c.line(p))} HT{p.type === 'mensuel' && <span className="block text-gray-500">par mois</span>}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                  <div className={'grid gap-x-8 border-t border-gray-200 bg-gray-50/60 px-4 py-3 text-sm sm:px-5 ' + (o.bP > 0 && o.bM > 0 ? 'sm:grid-cols-2' : '')}>
+                    {o.bP > 0 && (
+                      <div>
+                        <p className="font-semibold">Une seule fois</p>
+                        {remP > 0.005 && <Line l="Avant remise" v={eur(o.bP) + ' HT'} />}
+                        {remP > 0.005 && <Line minus l={'Remise' + (s.remises.ponctuel.mode === '%' ? ` ${s.remises.ponctuel.valeur} %` : '')} v={'− ' + eur(remP) + ' HT'} />}
+                        <Line l="Total HT" v={eur(o.htP)} />
+                        <Line l={`TVA ${s.tva} %`} v={eur(o.ttcP - o.htP)} />
+                        <Line strong l="Total TTC" v={eur(o.ttcP)} />
+                      </div>
+                    )}
+                    {o.bM > 0 && (
+                      <div>
+                        <p className="font-semibold">Par mois</p>
+                        {remM > 0.005 && <Line l="Avant remise" v={eur(o.bM) + ' HT'} />}
+                        {remM > 0.005 && <Line minus l={'Remise' + (s.remises.mensuel.mode === '%' ? ` ${s.remises.mensuel.valeur} %` : '')} v={'− ' + eur(remM) + ' HT'} />}
+                        <Line l="Total HT / mois" v={eur(o.htM)} />
+                        <Line l={`TVA ${s.tva} %`} v={eur(o.ttcM - o.htM)} />
+                        <Line strong l="Total TTC / mois" v={eur(o.ttcM)} />
+                      </div>
+                    )}
+                  </div>
                 </div>
-              </div>
-            )}
-            {c.mens.length > 0 && (
-              <div>
-                <p className="mb-1 font-semibold">Par mois</p>
-                {c.mens.map(p => <Line key={p.id} l={p.nom + (num(p.qte) > 1 ? ` × ${p.qte}` : '')} v={eur(c.line(p)) + ' HT'} />)}
-                {c.remM > 0 && <Line minus l={'Remise' + (s.remises.mensuel.mode === '%' ? ` ${s.remises.mensuel.valeur} %` : '')} v={'− ' + eur(c.remM) + ' HT'} />}
-                <div className="mt-1 border-t border-gray-200 pt-1">
-                  <Line l="Total HT / mois" v={eur(c.htM)} /><Line l={`TVA ${s.tva} %`} v={eur(c.tvaM)} /><Line strong l="Total TTC / mois" v={eur(c.ttcM)} />
-                </div>
-              </div>
-            )}
+              );
+            })}
           </div>
+          {c.offres.length > 1 && (
+            <div className="avoid-break mt-5 grid gap-x-8 rounded-2xl bg-gray-900 px-4 py-4 text-sm text-white sm:grid-cols-2 sm:px-5">
+              <p className="font-semibold sm:col-span-2">Si vous prenez tous les blocs</p>
+              {c.ttcP > 0 && <div className="flex justify-between py-1"><span className="text-white/70">Une seule fois</span><span className="tabular">{eur(c.htP)} HT · <strong>{eur(c.ttcP)} TTC</strong></span></div>}
+              {c.ttcM > 0 && <div className="flex justify-between py-1"><span className="text-white/70">Par mois</span><span className="tabular">{eur(c.htM)} HT · <strong>{eur(c.ttcM)} TTC</strong></span></div>}
+            </div>
+          )}
         </section>
 
         {/* 5. Inclus, conditions */}
