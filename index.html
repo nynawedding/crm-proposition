@@ -67,7 +67,7 @@ const OFFRE_IDS = OFFRES.map(o => o.id);
 // couleur de chaque pack dans la proposition
 const COULEURS = { base: '#1f3a5f', web: '#0f766e', social: '#6d28d9', fidel: '#b45309' };
 const OFFRE_PAR_DEFAUT = {
-  tournage: 'base', montage: 'base', retouche: 'base', ecrans: 'base',
+  tournage: 'base', montage: 'base',
   seo: 'web', suiviseo: 'web', site: 'web', hebergement: 'web', domaine: 'web', miseenligne: 'web', maintenance: 'web', majsite: 'web',
   planmkt: 'social', contenus: 'social', social: 'social', blog: 'social', reels: 'social', tiktok: 'social', reporting: 'social',
   formulaire: 'fidel', sms: 'fidel', fidelite: 'fidel', qravis: 'fidel', saison: 'fidel',
@@ -77,9 +77,7 @@ const remapOffre = (o) => (o === 'seo' ? 'web' : o);
 
 const CATALOGUE = [
   { id: 'tournage', type: 'ponctuel', nom: 'Tournage photo et vidéo sur place', description: "Une journée dans votre boutique : vos produits, vos gestes, votre équipe et l'ambiance, en photo et en vidéo.", prix: 600, qte: 1, unite: 'journée' },
-  { id: 'retouche', type: 'ponctuel', nom: 'Retouche photo', description: "Sélection et retouche professionnelle des meilleures photos (lumière, couleurs, cadrage). Lot de 20 photos.", prix: 120, qte: 1, unite: 'lot de 20' },
   { id: 'montage', type: 'ponctuel', nom: 'Montage vidéo', description: "Une journée de montage : choix des meilleures prises, montage, musique, textes, et export aux formats de vos écrans et réseaux.", prix: 450, qte: 1, unite: 'journée' },
-  { id: 'ecrans', type: 'ponctuel', nom: 'Contenus pour vos écrans en boutique', description: "Montage d'une boucle photo et vidéo au format de vos écrans (horizontal ou vertical), livrée prête à diffuser.", prix: 290, qte: 1, unite: 'boucle' },
   { id: 'seo', v: 3, garde: true, type: 'ponctuel', nom: 'Pack Google My Business', description: "Création et réglage complet de votre fiche Google (Maps) : catégories, horaires, photos, produits, lien vers le site, et mots-clés locaux sur le site.", prix: 580, qte: 1, unite: 'forfait' },
   { id: 'site', type: 'ponctuel', nom: 'Création de site internet', description: "Site vitrine responsive (5 à 8 pages), design sur mesure, formulaire de contact, optimisé mobile.", prix: 1490, qte: 1, unite: 'site' },
   { id: 'suiviseo', v: 3, garde: true, type: 'mensuel', nom: 'Optimisation de la page Google My Business', description: "Chaque mois : publications et photos sur votre fiche, réponses aux avis, suivi de votre position sur Google.", prix: 99, qte: 1, unite: 'mois' },
@@ -107,7 +105,7 @@ const CATALOGUE = [
    Réglages possibles par ligne : prix, qte, type (sinon : valeurs du catalogue).
    La remise affichée = prix à la carte − prix final : elle est toujours réelle. */
 // Les ids internes (signature, premium, serenite) sont gardés pour les sauvegardes ; les noms suivent les packs vendus.
-const IDS_VISUEL_WEB = ['tournage', 'retouche', 'montage', 'ecrans', 'seo', 'site', 'suiviseo', 'hebergement', 'domaine', 'miseenligne'];
+const IDS_VISUEL_WEB = ['tournage', 'montage', 'seo', 'site', 'suiviseo', 'hebergement', 'domaine', 'miseenligne'];
 const IDS_CROISSANCE = [...IDS_VISUEL_WEB, 'planmkt', 'blog', 'contenus', 'social', 'reels'];
 const IDS_SERENITE = [...IDS_CROISSANCE, 'formulaire', 'sms', 'fidelite', 'qravis', 'saison', 'reporting'];
 const toItems = (ids) => Object.fromEntries(ids.map(id => [id, {}]));
@@ -115,7 +113,7 @@ const remiseDe = (x) => ({ ponctuel: { mode: '%', valeur: x }, mensuel: { mode: 
 const PACKS = [
   { id: 'signature', v: 2, nom: 'Pack Premium', sous: 'Photo-vidéo + visibilité web',
     promesse: 'De belles images de votre boutique et un commerce bien visible sur Google.',
-    points: ['Tournage photo et vidéo dans votre boutique', 'Photos retouchées et vidéos pour vos écrans', 'Fiche Google My Business optimisée', 'Votre site internet, hébergé, avec nom de domaine'],
+    points: ['Tournage photo et vidéo dans votre boutique', 'Montage vidéo de vos images', 'Fiche Google My Business optimisée', 'Votre site internet, hébergé, avec nom de domaine'],
     items: toItems(IDS_VISUEL_WEB), remises: remiseDe(10) },
   { id: 'premium', v: 2, nom: 'Pack Croissance', sous: '+ communication', recommande: true,
     promesse: 'Tout le Premium, et nous communiquons pour vous faire gagner de nouveaux clients.',
@@ -159,15 +157,15 @@ const QUESTIONS = [
 const suggestions = (rep) => {
   const s = new Set();
   const has = (q, o) => (rep[q] || []).includes(o);
-  if (has('demande', 'Shooting photo')) ['tournage', 'retouche'].forEach(x => s.add(x));
+  if (has('demande', 'Shooting photo')) ['tournage'].forEach(x => s.add(x));
   if (has('demande', 'Vidéos')) ['tournage', 'montage'].forEach(x => s.add(x));
-  if (has('demande', 'Contenus pour mes écrans en boutique')) ['tournage', 'montage', 'retouche', 'ecrans'].forEach(x => s.add(x));
+  if (has('demande', 'Contenus pour mes écrans en boutique')) ['tournage', 'montage'].forEach(x => s.add(x));
   if (has('demande', 'Site internet')) s.add('site');
   if (has('demande', 'Réseaux sociaux')) s.add('social');
   if (has('site', 'Non') || has('site', 'Oui, à refaire')) ['site', 'miseenligne', 'hebergement', 'maintenance'].forEach(x => s.add(x));
   if (has('objectif', 'Être visible sur Google') || has('objectif', 'Attirer plus de clients en boutique')) ['seo', 'suiviseo'].forEach(x => s.add(x));
   if (has('objectif', 'Développer les réseaux sociaux') || has('reseaux', 'Personne') || has('reseaux', 'Moi-même')) ['social', 'contenus'].forEach(x => s.add(x));
-  if (has('objectif', 'Image plus premium')) ['tournage', 'retouche'].forEach(x => s.add(x));
+  if (has('objectif', 'Image plus premium')) ['tournage'].forEach(x => s.add(x));
   if (has('deleguer', 'Oui, entièrement')) ['social', 'contenus', 'majsite', 'reporting'].forEach(x => s.add(x));
   if (has('nouveaux', 'Oui, c\'est la priorité')) ['seo', 'montage'].forEach(x => s.add(x));
   return s;
@@ -238,8 +236,10 @@ const load = () => {
       return { ...p, ...base, offre: valide(offre) ? offre : p.offre };
     });
     // seules les prestations créées à la main sont gardées en plus du catalogue
-    const anciennes = { shooting: 'base', video: 'base' }; // prestations des versions précédentes, gardées avec vos prix
+    const anciennes = { video: 'base' }; // prestations des versions précédentes, gardées avec vos prix
     const extras = (s.prestations || [])
+      // prestations retirées à la demande (shooting photo professionnel)
+      .filter(x => x.id !== 'perso-shooting' && x.nom !== 'Shooting photo professionnel')
       .filter(x => String(x.id).startsWith('perso-') || anciennes[x.id])
       .map(x => anciennes[x.id] ? { ...x, id: 'perso-' + x.id } : x)
       .filter((x, i, arr) => arr.findIndex(y => y.id === x.id) === i)
