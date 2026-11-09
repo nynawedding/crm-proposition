@@ -1,0 +1,819 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Proposition commerciale</title>
+<meta name="theme-color" content="#ffffff">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Fraunces:opsz,wght@9..144,500;9..144,600&display=swap" rel="stylesheet">
+<script src="https://cdn.tailwindcss.com/3.4.16"></script>
+<script>
+  tailwind.config = {
+    theme: {
+      extend: {
+        fontFamily: { sans: ['Inter', 'system-ui', 'sans-serif'], display: ['Fraunces', 'Georgia', 'serif'] },
+        colors: { ink: '#111827', accent: { DEFAULT: '#1f3a5f', soft: '#e8eef6' } },
+      },
+    },
+  };
+</script>
+<style>
+  html { -webkit-text-size-adjust: 100%; }
+  body { background: #f4f5f7; }
+  input[type=number]::-webkit-inner-spin-button { opacity: .4; }
+  .tabular { font-variant-numeric: tabular-nums; }
+  @media print {
+    @page { size: A4; margin: 14mm; }
+    body { background: #fff !important; }
+    .no-print { display: none !important; }
+    #proposal-overlay { position: static !important; background: #fff !important; overflow: visible !important; padding: 0 !important; }
+    #app-main { display: none !important; }
+    #proposal { box-shadow: none !important; border: 0 !important; margin: 0 !important; max-width: none !important; padding: 0 !important; }
+    .avoid-break { break-inside: avoid; }
+  }
+</style>
+<script src="https://unpkg.com/react@18.3.1/umd/react.production.min.js" crossorigin></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.production.min.js" crossorigin></script>
+<script src="https://unpkg.com/@babel/standalone@7.24.7/babel.min.js" crossorigin></script>
+</head>
+<body class="font-sans text-ink antialiased">
+<div id="root"></div>
+
+<script type="text/babel" data-presets="react">
+const { useState, useEffect, useMemo, useRef } = React;
+
+/* ============================================================
+   Données par défaut (tarifs indicatifs : à ajuster dans l'app)
+   ============================================================ */
+const CATALOGUE = [
+  { id: 'site', type: 'ponctuel', nom: 'Création de site internet', description: "Site vitrine responsive (5 à 8 pages), design sur mesure, formulaire de contact, optimisé mobile.", prix: 1490, qte: 1, unite: 'site' },
+  { id: 'shooting', type: 'ponctuel', nom: 'Shooting photo professionnel', description: "Demi-journée sur place : produits, équipe, boutique. Photos retouchées, droits d'usage web et réseaux.", prix: 390, qte: 1, unite: 'séance' },
+  { id: 'video', type: 'ponctuel', nom: 'Production vidéo / Reels', description: "Tournage et montage de vidéos courtes verticales, sous-titrées, prêtes à publier.", prix: 190, qte: 3, unite: 'vidéo' },
+  { id: 'seo', type: 'ponctuel', nom: 'SEO et référencement local', description: "Audit, mots-clés locaux, optimisation des pages et des balises, inscription aux annuaires clés.", prix: 390, qte: 1, unite: 'forfait' },
+  { id: 'gbp', type: 'ponctuel', nom: 'Optimisation fiche Google Business Profile', description: "Fiche complète : catégories, horaires, photos, produits, réponses aux avis.", prix: 190, qte: 1, unite: 'forfait' },
+  { id: 'miseenligne', type: 'ponctuel', nom: 'Mise en ligne et configuration', description: "Nom de domaine, hébergement, adresses email, statistiques, sécurité (HTTPS).", prix: 150, qte: 1, unite: 'forfait' },
+  { id: 'social', type: 'mensuel', nom: 'Gestion Instagram / Facebook', description: "Planning éditorial, 3 publications par semaine, stories, modération des commentaires.", prix: 390, qte: 1, unite: 'mois' },
+  { id: 'contenus', type: 'mensuel', nom: 'Création de contenus réguliers', description: "Photos et visuels produits chaque mois, déclinés pour le site et les réseaux.", prix: 290, qte: 1, unite: 'mois' },
+  { id: 'tiktok', type: 'mensuel', nom: 'Gestion TikTok', description: "Idées, tournage léger et publication de vidéos tendances, adaptées au commerce.", prix: 250, qte: 1, unite: 'mois' },
+  { id: 'maintenance', type: 'mensuel', nom: 'Maintenance technique du site', description: "Sauvegardes, mises à jour de sécurité, surveillance de disponibilité.", prix: 49, qte: 1, unite: 'mois' },
+  { id: 'hebergement', type: 'mensuel', nom: 'Hébergement et nom de domaine', description: "Hébergement rapide et sécurisé, nom de domaine et certificat SSL inclus.", prix: 19, qte: 1, unite: 'mois' },
+  { id: 'majsite', type: 'mensuel', nom: 'Mises à jour du site', description: "Modifications de contenu : horaires, produits, actualités, photos (jusqu'à 1 h / mois).", prix: 39, qte: 1, unite: 'mois' },
+  { id: 'suiviseo', type: 'mensuel', nom: 'Suivi SEO local', description: "Suivi des positions, publications Google, gestion des avis, ajustements continus.", prix: 99, qte: 1, unite: 'mois' },
+  { id: 'reporting', type: 'mensuel', nom: 'Reporting mensuel', description: "Tableau de bord clair : visites, appels, abonnés, avis, et recommandations du mois.", prix: 49, qte: 1, unite: 'mois' },
+].map(p => ({ ...p, selected: false, pack: false }));
+
+const QUESTIONS = [
+  { id: 'objectif', q: 'Quel est votre objectif principal ?', multi: true,
+    options: ['Attirer plus de clients en boutique', 'Être visible sur Google', 'Développer les réseaux sociaux', 'Prendre des commandes en ligne', 'Image plus premium', 'Fidéliser la clientèle'] },
+  { id: 'site', q: 'Avez-vous déjà un site internet ?',
+    options: ['Non', 'Oui, à refaire', 'Oui, il me convient'] },
+  { id: 'reseaux', q: 'Qui gère actuellement vos réseaux sociaux ?',
+    options: ['Personne', 'Moi-même', 'Un employé ou un proche', 'Une agence'] },
+  { id: 'nouveaux', q: 'Souhaitez-vous attirer de nouveaux clients ?',
+    options: ['Oui, c\'est la priorité', 'Oui', 'Plutôt fidéliser'] },
+  { id: 'produits', q: 'Quels produits ou services souhaitez-vous mettre en avant ?', multi: true,
+    options: ['Produits phares', 'Nouveautés', 'Offres et promotions', 'Sur-mesure / commandes', 'Événements'] },
+  { id: 'deleguer', q: 'Souhaitez-vous déléguer entièrement votre communication ?',
+    options: ['Oui, entièrement', 'En partie', 'Non, être accompagné'] },
+  { id: 'budget', q: 'Avez-vous un budget mensuel prévu ?',
+    options: ['Moins de 200 €', '200 à 500 €', '500 à 1 000 €', 'Plus de 1 000 €', 'Pas encore défini'] },
+  { id: 'demarrage', q: 'Quand souhaitez-vous démarrer ?',
+    options: ['Immédiatement', 'Dans le mois', 'Dans 3 mois', 'À définir'] },
+];
+
+// Prestations suggérées selon les réponses
+const suggestions = (rep) => {
+  const s = new Set();
+  const has = (q, o) => (rep[q] || []).includes(o);
+  if (has('site', 'Non') || has('site', 'Oui, à refaire')) ['site', 'miseenligne', 'hebergement', 'maintenance'].forEach(x => s.add(x));
+  if (has('objectif', 'Être visible sur Google') || has('objectif', 'Attirer plus de clients en boutique')) ['gbp', 'seo', 'suiviseo'].forEach(x => s.add(x));
+  if (has('objectif', 'Développer les réseaux sociaux') || has('reseaux', 'Personne') || has('reseaux', 'Moi-même')) ['social', 'contenus'].forEach(x => s.add(x));
+  if (has('objectif', 'Image plus premium')) ['shooting', 'video'].forEach(x => s.add(x));
+  if (has('deleguer', 'Oui, entièrement')) ['social', 'contenus', 'majsite', 'reporting'].forEach(x => s.add(x));
+  if (has('nouveaux', 'Oui, c\'est la priorité')) ['gbp', 'video'].forEach(x => s.add(x));
+  return s;
+};
+
+const ENGAGEMENTS = [
+  { v: 0, label: 'Sans engagement' }, { v: 3, label: '3 mois' }, { v: 6, label: '6 mois' }, { v: 12, label: '12 mois' },
+];
+
+const blankClient = { entreprise: '', responsable: '', telephone: '', email: '', adresse: '', secteur: '' };
+
+// Client préenregistré (source : site et mentions légales de La Boulangerie). Email non publié : à compléter.
+const PREFILL = {
+  client: { entreprise: 'La Boulangerie', responsable: 'Doria Rabah', telephone: '04 91 37 00 61', email: '',
+    adresse: '17 avenue Alexandre Ansaldi, 13014 Marseille', secteur: 'Boulangerie-pâtisserie' },
+  demoUrl: 'https://nynawedding.github.io/la-boulangerie/',
+};
+
+const DEFAULTS = {
+  prefillApplied: true,
+  client: PREFILL.client,
+  reponses: {},
+  notes: {},
+  prestations: CATALOGUE,
+  packNom: 'Pack Visibilité',
+  remises: { ponctuel: { mode: '%', valeur: 0 }, mensuel: { mode: '%', valeur: 0 } },
+  tva: 20,
+  engagement: 12,
+  acompte: { actif: true, pct: 30 },
+  visuels: { logo: '', photos: [], demoUrl: PREFILL.demoUrl },
+  presentation: '',
+  inclus: "Hébergement sécurisé et sauvegardes\nMises à jour de sécurité\nSupport par téléphone et email (réponse sous 48 h ouvrées)\nAccès aux statistiques",
+  paiement: "Acompte à la signature, solde à la mise en ligne.\nAbonnements mensuels payables par prélèvement ou virement en début de mois.",
+  validite: 30,
+  vendeur: { nom: '', societe: '', telephone: '', email: '', siret: '' },
+};
+
+/* ============================ Utilitaires ============================ */
+const STORE = 'crm-proposition-v1';
+const eur = (n) => new Intl.NumberFormat('fr-FR', { style: 'currency', currency: 'EUR', maximumFractionDigits: n % 1 ? 2 : 0 }).format(n || 0);
+const num = (v) => { const n = parseFloat(String(v).replace(',', '.')); return isNaN(n) ? 0 : n; };
+const today = () => new Date();
+const fmtDate = (d) => d.toLocaleDateString('fr-FR', { day: 'numeric', month: 'long', year: 'numeric' });
+const addDays = (d, n) => { const x = new Date(d); x.setDate(x.getDate() + n); return x; };
+
+const load = () => {
+  try {
+    const s = JSON.parse(localStorage.getItem(STORE) || 'null');
+    if (!s) return DEFAULTS;
+    // fusion prudente avec les valeurs par défaut (nouvelles prestations, nouveaux champs)
+    const prestations = CATALOGUE.map(p => ({ ...p, ...(s.prestations || []).find(x => x.id === p.id) }));
+    const extras = (s.prestations || []).filter(x => !CATALOGUE.some(p => p.id === x.id));
+    // une seule fois : si la fiche enregistrée est vide, on y met le client préenregistré
+    const vide = !Object.values(s.client || {}).some(v => String(v).trim());
+    const client = !s.prefillApplied && vide ? PREFILL.client : { ...blankClient, ...s.client };
+    const demo = !s.prefillApplied && !(s.visuels || {}).demoUrl ? { demoUrl: PREFILL.demoUrl } : {};
+    return { ...DEFAULTS, ...s, prefillApplied: true, client, vendeur: { ...DEFAULTS.vendeur, ...s.vendeur },
+      visuels: { ...DEFAULTS.visuels, ...s.visuels, ...demo }, remises: { ...DEFAULTS.remises, ...s.remises }, acompte: { ...DEFAULTS.acompte, ...s.acompte },
+      prestations: [...prestations, ...extras] };
+  } catch { return DEFAULTS; }
+};
+
+// Réduit une image (photo de téléphone) avant de la garder en mémoire locale
+const compress = (file, max = 1400, q = 0.82) => new Promise((resolve, reject) => {
+  const r = new FileReader();
+  r.onerror = reject;
+  r.onload = () => {
+    const img = new Image();
+    img.onerror = reject;
+    img.onload = () => {
+      const k = Math.min(1, max / Math.max(img.width, img.height));
+      const c = document.createElement('canvas');
+      c.width = Math.round(img.width * k); c.height = Math.round(img.height * k);
+      const ctx = c.getContext('2d');
+      const png = file.type === 'image/png' || file.type === 'image/svg+xml';
+      if (!png) { ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, c.width, c.height); }
+      ctx.drawImage(img, 0, 0, c.width, c.height);
+      resolve(c.toDataURL(png ? 'image/png' : 'image/jpeg', q));
+    };
+    img.src = r.result;
+  };
+  r.readAsDataURL(file);
+});
+
+const waNumber = (tel) => {
+  let d = (tel || '').replace(/[^\d+]/g, '');
+  if (d.startsWith('+')) return d.slice(1);
+  if (d.startsWith('00')) return d.slice(2);
+  if (d.startsWith('0') && d.length === 10) return '33' + d.slice(1);
+  return d;
+};
+
+/* ============================ Calculs ============================ */
+function compute(s) {
+  const sel = s.prestations.filter(p => p.selected);
+  const line = (p) => num(p.prix) * Math.max(1, num(p.qte) || 1);
+  const ponct = sel.filter(p => p.type === 'ponctuel');
+  const mens = sel.filter(p => p.type === 'mensuel');
+  const brutP = ponct.reduce((a, p) => a + line(p), 0);
+  const brutM = mens.reduce((a, p) => a + line(p), 0);
+  const rem = (brut, r) => Math.min(brut, Math.max(0, r.mode === '%' ? brut * num(r.valeur) / 100 : num(r.valeur)));
+  const remP = rem(brutP, s.remises.ponctuel);
+  const remM = rem(brutM, s.remises.mensuel);
+  const htP = brutP - remP, htM = brutM - remM;
+  const t = num(s.tva) / 100;
+  const ttcP = htP * (1 + t), ttcM = htM * (1 + t);
+  const mois = s.engagement || 0;
+  const moisCalc = mois || 1; // sans engagement : 1er mois
+  const totalHT = htP + htM * moisCalc;
+  const totalTTC = ttcP + ttcM * moisCalc;
+  const acompte = s.acompte.actif ? ttcP * num(s.acompte.pct) / 100 : 0;
+  return { sel, ponct, mens, line, brutP, brutM, remP, remM, htP, htM, ttcP, ttcM, tvaP: ttcP - htP, tvaM: ttcM - htM,
+    mois, moisCalc, totalHT, totalTTC, acompte };
+}
+
+/* ============================ UI de base ============================ */
+const inputCls = 'w-full rounded-xl border border-gray-200 bg-white px-3.5 py-2.5 text-[15px] outline-none transition focus:border-accent focus:ring-4 focus:ring-accent/10 placeholder:text-gray-400';
+
+function Field({ label, children, className = '' }) {
+  return <label className={'block ' + className}><span className="mb-1.5 block text-xs font-medium uppercase tracking-wide text-gray-500">{label}</span>{children}</label>;
+}
+
+function Section({ n, title, hint, open, onToggle, children, right }) {
+  return (
+    <section className="rounded-2xl border border-gray-200/80 bg-white shadow-[0_1px_2px_rgba(16,24,40,.04)]">
+      <button type="button" onClick={onToggle} className="flex w-full items-center gap-4 px-5 py-4 text-left sm:px-6" aria-expanded={open}>
+        <span className="grid h-8 w-8 shrink-0 place-items-center rounded-full bg-gray-100 text-sm font-semibold text-gray-600">{n}</span>
+        <span className="min-w-0 flex-1">
+          <span className="block font-display text-lg font-semibold leading-tight">{title}</span>
+          {hint && <span className="mt-0.5 block truncate text-sm text-gray-500">{hint}</span>}
+        </span>
+        {right}
+        <svg className={'h-5 w-5 shrink-0 text-gray-400 transition-transform ' + (open ? 'rotate-180' : '')} viewBox="0 0 20 20" fill="currentColor"><path fillRule="evenodd" d="M5.23 7.21a.75.75 0 011.06.02L10 11.17l3.71-3.94a.75.75 0 111.08 1.04l-4.25 4.5a.75.75 0 01-1.08 0l-4.25-4.5a.75.75 0 01.02-1.06z" clipRule="evenodd"/></svg>
+      </button>
+      {open && <div className="border-t border-gray-100 px-5 pb-6 pt-5 sm:px-6">{children}</div>}
+    </section>
+  );
+}
+
+function Chip({ active, onClick, children }) {
+  return (
+    <button type="button" onClick={onClick}
+      className={'rounded-full border px-3.5 py-2 text-sm transition active:scale-[.98] ' +
+        (active ? 'border-accent bg-accent text-white' : 'border-gray-200 bg-white text-gray-700 hover:border-gray-300')}>
+      {children}
+    </button>
+  );
+}
+
+function Segmented({ value, options, onChange }) {
+  return (
+    <div className="inline-flex rounded-xl bg-gray-100 p-1">
+      {options.map(o => (
+        <button key={o.v} type="button" onClick={() => onChange(o.v)}
+          className={'rounded-lg px-3 py-1.5 text-sm font-medium transition ' + (value === o.v ? 'bg-white text-ink shadow-sm' : 'text-gray-500')}>{o.label}</button>
+      ))}
+    </div>
+  );
+}
+
+function Toast({ msg }) {
+  if (!msg) return null;
+  return <div className="no-print fixed inset-x-0 bottom-24 z-[70] mx-auto w-fit max-w-[92vw] rounded-xl bg-ink px-4 py-3 text-center text-sm text-white shadow-lg">{msg}</div>;
+}
+
+/* ============================ Carte prestation ============================ */
+function PrestationCard({ p, suggested, onChange, onRemove }) {
+  const total = num(p.prix) * Math.max(1, num(p.qte) || 1);
+  return (
+    <div className={'rounded-2xl border p-4 transition ' + (p.selected ? 'border-accent bg-accent-soft/40 ring-1 ring-accent/20' : 'border-gray-200 bg-white')}>
+      <div className="flex items-start gap-3">
+        <button type="button" onClick={() => onChange({ selected: !p.selected })} aria-pressed={p.selected}
+          className={'mt-0.5 grid h-6 w-6 shrink-0 place-items-center rounded-md border transition ' + (p.selected ? 'border-accent bg-accent text-white' : 'border-gray-300 bg-white')}>
+          {p.selected && <svg className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor"><path fillRule="evenodd" d="M16.7 5.3a1 1 0 010 1.4l-7.5 7.5a1 1 0 01-1.4 0l-3.5-3.5a1 1 0 111.4-1.4l2.8 2.8 6.8-6.8a1 1 0 011.4 0z" clipRule="evenodd"/></svg>}
+        </button>
+        <div className="min-w-0 flex-1">
+          <div className="flex flex-wrap items-center gap-2">
+            <input value={p.nom} onChange={e => onChange({ nom: e.target.value })}
+              className="min-w-0 flex-1 bg-transparent text-[15px] font-semibold outline-none" aria-label="Nom de la prestation" />
+            {suggested && !p.selected && <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[11px] font-medium text-amber-800">Suggéré</span>}
+          </div>
+          <textarea value={p.description} onChange={e => onChange({ description: e.target.value })} rows={2}
+            className="mt-1 w-full resize-none bg-transparent text-sm leading-snug text-gray-600 outline-none" aria-label="Description" />
+        </div>
+      </div>
+      <div className="mt-3 flex flex-wrap items-end gap-3 pl-9">
+        <label className="w-28">
+          <span className="mb-1 block text-[11px] uppercase tracking-wide text-gray-500">Prix HT</span>
+          <div className="relative">
+            <input type="number" inputMode="decimal" min="0" step="1" value={p.prix} onChange={e => onChange({ prix: e.target.value })}
+              className={inputCls + ' tabular py-2 pr-7'} />
+            <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-sm text-gray-400">€</span>
+          </div>
+        </label>
+        <label className="w-20">
+          <span className="mb-1 block text-[11px] uppercase tracking-wide text-gray-500">Qté</span>
+          <input type="number" inputMode="numeric" min="1" step="1" value={p.qte} onChange={e => onChange({ qte: e.target.value })}
+            className={inputCls + ' tabular py-2'} />
+        </label>
+        <label className="flex items-center gap-2 pb-2.5 text-sm text-gray-600">
+          <input type="checkbox" checked={p.pack} onChange={e => onChange({ pack: e.target.checked, selected: e.target.checked ? true : p.selected })}
+            className="h-4 w-4 rounded border-gray-300 accent-[#1f3a5f]" /> Dans le pack
+        </label>
+        <div className="ml-auto pb-2 text-right">
+          <div className="tabular text-base font-semibold">{eur(total)}</div>
+          <div className="text-[11px] text-gray-500">{p.type === 'mensuel' ? 'HT / mois' : 'HT'}</div>
+        </div>
+        {onRemove && <button type="button" onClick={onRemove} className="pb-2 text-xs text-gray-400 hover:text-red-600">Supprimer</button>}
+      </div>
+    </div>
+  );
+}
+
+/* ============================ Proposition ============================ */
+function buildText(s, c, numero) {
+  const L = [];
+  const cl = s.client;
+  L.push(`PROPOSITION COMMERCIALE ${numero}`);
+  L.push(`${cl.entreprise || 'Client'}${cl.responsable ? ' · ' + cl.responsable : ''}`);
+  L.push('');
+  const obj = s.reponses.objectif || [];
+  if (obj.length) { L.push('Objectifs : ' + obj.join(', ')); L.push(''); }
+  if (c.ponct.length) {
+    L.push('CRÉATION INITIALE');
+    c.ponct.forEach(p => L.push(`• ${p.nom}${num(p.qte) > 1 ? ' ×' + p.qte : ''} : ${eur(c.line(p))} HT`));
+    if (c.remP) L.push(`Remise : -${eur(c.remP)} HT`);
+    L.push(`Total : ${eur(c.htP)} HT (${eur(c.ttcP)} TTC)`);
+    L.push('');
+  }
+  if (c.mens.length) {
+    L.push('ABONNEMENT MENSUEL');
+    c.mens.forEach(p => L.push(`• ${p.nom} : ${eur(c.line(p))} HT / mois`));
+    if (c.remM) L.push(`Remise : -${eur(c.remM)} HT / mois`);
+    L.push(`Mensualité : ${eur(c.htM)} HT (${eur(c.ttcM)} TTC)`);
+    L.push('');
+  }
+  L.push(`Engagement : ${c.mois ? c.mois + ' mois' : 'sans engagement'}`);
+  L.push(`Total ${c.mois ? 'sur ' + c.mois + ' mois' : '1er mois'} : ${eur(c.totalHT)} HT · ${eur(c.totalTTC)} TTC`);
+  if (c.acompte) L.push(`Acompte à la signature : ${eur(c.acompte)} TTC (${s.acompte.pct} %)`);
+  L.push(`Offre valable jusqu'au ${fmtDate(addDays(today(), num(s.validite)))}.`);
+  if (s.visuels.demoUrl) { L.push(''); L.push('Démonstration : ' + s.visuels.demoUrl); }
+  const v = s.vendeur;
+  if (v.nom || v.telephone) { L.push(''); L.push([v.nom, v.societe, v.telephone, v.email].filter(Boolean).join(' · ')); }
+  return L.join('\n');
+}
+
+function Proposal({ s, c, numero, onClose, toast }) {
+  const cl = s.client, v = s.vendeur;
+  const obj = s.reponses.objectif || [];
+  const others = QUESTIONS.filter(q => q.id !== 'objectif' && (s.reponses[q.id] || []).length);
+  const packItems = c.sel.filter(p => p.pack);
+  const presentation = s.presentation.trim() ||
+    `${cl.entreprise || 'Votre commerce'}${cl.secteur ? ', ' + cl.secteur.toLowerCase() : ''}, souhaite renforcer sa présence en ligne et attirer davantage de clients. Cette proposition réunit les prestations retenues ensemble lors de notre rendez-vous, avec un budget clair dès le départ.`;
+  const text = buildText(s, c, numero);
+  const subject = `Proposition commerciale ${numero}${cl.entreprise ? ' – ' + cl.entreprise : ''}`;
+
+  const copy = async () => {
+    try { await navigator.clipboard.writeText(text); toast('Récapitulatif copié dans le presse-papiers.'); }
+    catch { toast('Copie impossible : sélectionnez le texte manuellement.'); }
+  };
+  const whatsapp = () => {
+    const n = waNumber(cl.telephone);
+    window.open(`https://wa.me/${n}?text=${encodeURIComponent(text)}`, '_blank');
+    toast('WhatsApp est ouvert avec le message prérempli. Vérifiez-le puis appuyez sur Envoyer.');
+  };
+  const email = () => {
+    window.location.href = `mailto:${encodeURIComponent(cl.email || '')}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(text)}`;
+    toast('Votre messagerie est ouverte avec le message prérempli. Joignez le PDF puis envoyez.');
+  };
+
+  const Row = ({ label, value, strong, muted }) => (
+    <div className={'flex items-baseline justify-between gap-4 py-1.5 ' + (strong ? 'font-semibold' : '') + (muted ? ' text-gray-500' : '')}>
+      <span>{label}</span><span className="tabular">{value}</span>
+    </div>
+  );
+
+  return (
+    <div id="proposal-overlay" className="fixed inset-0 z-50 overflow-y-auto bg-gray-900/40 p-0 backdrop-blur-sm sm:p-6">
+      <div className="no-print sticky top-0 z-10 mx-auto flex max-w-[860px] flex-wrap items-center gap-2 bg-white/95 px-4 py-3 shadow-sm backdrop-blur sm:rounded-t-2xl">
+        <button onClick={onClose} className="rounded-xl px-3 py-2 text-sm font-medium text-gray-600 hover:bg-gray-100">← Retour</button>
+        <div className="ml-auto flex flex-wrap gap-2">
+          <button onClick={() => window.print()} className="rounded-xl bg-ink px-4 py-2 text-sm font-semibold text-white">Exporter en PDF</button>
+          <button onClick={copy} className="rounded-xl border border-gray-200 px-4 py-2 text-sm font-medium">Copier</button>
+          <button onClick={whatsapp} className="rounded-xl bg-[#25D366] px-4 py-2 text-sm font-semibold text-white">WhatsApp</button>
+          <button onClick={email} className="rounded-xl border border-gray-200 px-4 py-2 text-sm font-medium">Email</button>
+        </div>
+      </div>
+
+      <article id="proposal" className="mx-auto max-w-[860px] bg-white px-6 py-10 text-[14.5px] leading-relaxed shadow-xl sm:rounded-b-2xl sm:px-12">
+        <header className="avoid-break flex flex-wrap items-start justify-between gap-6 border-b border-gray-200 pb-8">
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-[.18em] text-gray-500">Proposition commerciale</p>
+            <h1 className="mt-2 font-display text-3xl font-semibold leading-tight">{cl.entreprise || 'Votre projet digital'}</h1>
+            <p className="mt-2 text-sm text-gray-500">N° {numero} · {fmtDate(today())} · valable jusqu'au {fmtDate(addDays(today(), num(s.validite)))}</p>
+          </div>
+          {s.visuels.logo && <img src={s.visuels.logo} alt="" className="h-16 max-w-[180px] object-contain" />}
+        </header>
+
+        <div className="avoid-break grid gap-6 border-b border-gray-200 py-7 sm:grid-cols-2">
+          <div>
+            <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-gray-500">Client</p>
+            <p className="font-semibold">{cl.entreprise || '—'}</p>
+            {cl.responsable && <p>{cl.responsable}</p>}
+            {cl.adresse && <p className="text-gray-600">{cl.adresse}</p>}
+            {(cl.telephone || cl.email) && <p className="text-gray-600">{[cl.telephone, cl.email].filter(Boolean).join(' · ')}</p>}
+          </div>
+          {(v.nom || v.societe) && (
+            <div>
+              <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-gray-500">Votre interlocuteur</p>
+              <p className="font-semibold">{v.nom}</p>
+              {v.societe && <p>{v.societe}</p>}
+              {(v.telephone || v.email) && <p className="text-gray-600">{[v.telephone, v.email].filter(Boolean).join(' · ')}</p>}
+              {v.siret && <p className="text-gray-500">SIRET {v.siret}</p>}
+            </div>
+          )}
+        </div>
+
+        <section className="avoid-break py-7">
+          <h2 className="font-display text-xl font-semibold">Le projet</h2>
+          <p className="mt-2 whitespace-pre-line text-gray-700">{presentation}</p>
+          {obj.length > 0 && (
+            <>
+              <h3 className="mt-5 text-sm font-semibold uppercase tracking-wide text-gray-500">Objectifs identifiés</h3>
+              <ul className="mt-2 grid gap-1.5 sm:grid-cols-2">{obj.map(o => <li key={o} className="flex gap-2"><span className="text-accent">✓</span>{o}</li>)}</ul>
+            </>
+          )}
+          {others.length > 0 && (
+            <dl className="mt-5 grid gap-x-6 gap-y-2 text-sm sm:grid-cols-2">
+              {others.map(q => <div key={q.id}><dt className="text-gray-500">{q.q}</dt><dd className="font-medium">{s.reponses[q.id].join(', ')}</dd></div>)}
+            </dl>
+          )}
+        </section>
+
+        {(s.visuels.photos.length > 0 || s.visuels.demoUrl) && (
+          <section className="avoid-break border-t border-gray-200 py-7">
+            {s.visuels.photos.length > 0 && (
+              <div className="grid grid-cols-3 gap-2">{s.visuels.photos.slice(0, 6).map((ph, i) => <img key={i} src={ph} alt="" className="aspect-[4/3] w-full rounded-lg object-cover" />)}</div>
+            )}
+            {s.visuels.demoUrl && <p className="mt-4 text-sm">Démonstration en ligne : <a href={s.visuels.demoUrl} className="font-medium text-accent underline">{s.visuels.demoUrl}</a></p>}
+          </section>
+        )}
+
+        <section className="border-t border-gray-200 py-7">
+          <h2 className="font-display text-xl font-semibold">Prestations retenues</h2>
+          {packItems.length > 0 && <p className="mt-1 text-sm text-gray-500">Les prestations marquées ◆ composent le {s.packNom}.</p>}
+          {[['Création initiale', c.ponct, ''], ['Abonnement mensuel', c.mens, ' / mois']].map(([t, items, suf]) => items.length > 0 && (
+            <div key={t} className="avoid-break mt-5">
+              <h3 className="text-sm font-semibold uppercase tracking-wide text-gray-500">{t}</h3>
+              <table className="mt-2 w-full border-collapse">
+                <tbody>
+                  {items.map(p => (
+                    <tr key={p.id} className="border-b border-gray-100 align-top">
+                      <td className="py-3 pr-4">
+                        <p className="font-medium">{p.pack && <span className="mr-1 text-accent">◆</span>}{p.nom}{num(p.qte) > 1 && <span className="font-normal text-gray-500"> × {p.qte}</span>}</p>
+                        <p className="text-sm text-gray-600">{p.description}</p>
+                      </td>
+                      <td className="tabular whitespace-nowrap py-3 text-right font-medium">{eur(c.line(p))}{suf}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          ))}
+          {c.sel.length === 0 && <p className="mt-3 text-gray-500">Aucune prestation sélectionnée.</p>}
+        </section>
+
+        <section className="avoid-break border-t border-gray-200 py-7">
+          <h2 className="font-display text-xl font-semibold">Investissement</h2>
+          <div className="mt-4 grid gap-6 sm:grid-cols-2">
+            {c.ponct.length > 0 && (
+              <div className="rounded-xl bg-gray-50 p-5">
+                <p className="text-sm font-semibold">Création initiale</p>
+                <Row label="Sous-total HT" value={eur(c.brutP)} muted={c.remP > 0} />
+                {c.remP > 0 && <Row label={'Remise' + (s.remises.ponctuel.mode === '%' ? ` (${s.remises.ponctuel.valeur} %)` : '')} value={'−' + eur(c.remP)} />}
+                <Row label="Total HT" value={eur(c.htP)} />
+                <Row label={`TVA ${s.tva} %`} value={eur(c.tvaP)} muted />
+                <div className="mt-1 border-t border-gray-200 pt-1"><Row label="Total TTC" value={eur(c.ttcP)} strong /></div>
+              </div>
+            )}
+            {c.mens.length > 0 && (
+              <div className="rounded-xl bg-gray-50 p-5">
+                <p className="text-sm font-semibold">Mensualité</p>
+                <Row label="Sous-total HT" value={eur(c.brutM)} muted={c.remM > 0} />
+                {c.remM > 0 && <Row label={'Remise' + (s.remises.mensuel.mode === '%' ? ` (${s.remises.mensuel.valeur} %)` : '')} value={'−' + eur(c.remM)} />}
+                <Row label="Total HT / mois" value={eur(c.htM)} />
+                <Row label={`TVA ${s.tva} %`} value={eur(c.tvaM)} muted />
+                <div className="mt-1 border-t border-gray-200 pt-1"><Row label="Total TTC / mois" value={eur(c.ttcM)} strong /></div>
+              </div>
+            )}
+          </div>
+          <div className="mt-6 rounded-xl border border-accent/30 bg-accent-soft/50 p-5">
+            <Row label={'Durée d\'engagement'} value={c.mois ? c.mois + ' mois' : 'Sans engagement'} />
+            <Row label={c.mois ? `Total sur ${c.mois} mois` : 'Total 1er mois'} value={`${eur(c.totalHT)} HT · ${eur(c.totalTTC)} TTC`} strong />
+            {c.acompte > 0 && <Row label={`Acompte à la signature (${s.acompte.pct} % de la création)`} value={eur(c.acompte) + ' TTC'} />}
+          </div>
+        </section>
+
+        <section className="avoid-break grid gap-6 border-t border-gray-200 py-7 sm:grid-cols-2">
+          {c.mens.length > 0 && s.inclus.trim() && (
+            <div>
+              <h3 className="font-display text-lg font-semibold">Maintenance et services inclus</h3>
+              <ul className="mt-2 space-y-1 text-gray-700">{s.inclus.split('\n').filter(Boolean).map(l => <li key={l} className="flex gap-2"><span className="text-accent">✓</span>{l}</li>)}</ul>
+            </div>
+          )}
+          <div>
+            <h3 className="font-display text-lg font-semibold">Conditions de paiement</h3>
+            <p className="mt-2 whitespace-pre-line text-gray-700">{s.paiement}</p>
+            <p className="mt-3 text-sm text-gray-500">Devis valable {s.validite} jours, jusqu'au {fmtDate(addDays(today(), num(s.validite)))}.</p>
+          </div>
+        </section>
+
+        <section className="avoid-break grid gap-6 border-t border-gray-200 pt-7 sm:grid-cols-2">
+          <div><p className="text-sm text-gray-500">Bon pour accord, date et signature du client</p><div className="mt-2 h-24 rounded-xl border border-dashed border-gray-300" /></div>
+          <div><p className="text-sm text-gray-500">Signature du prestataire</p><div className="mt-2 h-24 rounded-xl border border-dashed border-gray-300" /></div>
+        </section>
+      </article>
+      <div className="no-print h-10" />
+    </div>
+  );
+}
+
+/* ============================ Application ============================ */
+function App() {
+  const [s, setS] = useState(load);
+  const [open, setOpen] = useState({ client: true });
+  const [showProposal, setShowProposal] = useState(false);
+  const [preview, setPreview] = useState(null);
+  const [msg, setMsg] = useState('');
+  const timer = useRef();
+
+  useEffect(() => {
+    try { localStorage.setItem(STORE, JSON.stringify(s)); }
+    catch { toast('Mémoire locale pleine : retirez quelques photos.'); }
+  }, [s]);
+
+  const toast = (m) => { setMsg(m); clearTimeout(timer.current); timer.current = setTimeout(() => setMsg(''), 4500); };
+  const set = (patch) => setS(prev => ({ ...prev, ...(typeof patch === 'function' ? patch(prev) : patch) }));
+  const setClient = (k, v) => set(p => ({ client: { ...p.client, [k]: v } }));
+  const setVendeur = (k, v) => set(p => ({ vendeur: { ...p.vendeur, [k]: v } }));
+  const setPrest = (id, patch) => set(p => ({ prestations: p.prestations.map(x => x.id === id ? { ...x, ...patch } : x) }));
+  const toggle = (k) => setOpen(o => ({ ...o, [k]: !o[k] }));
+
+  const c = useMemo(() => compute(s), [s]);
+  const sugg = useMemo(() => suggestions(s.reponses), [s.reponses]);
+  const numero = useMemo(() => {
+    const d = today();
+    return `DEV-${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, '0')}${String(d.getDate()).padStart(2, '0')}-${(s.client.entreprise || 'X').replace(/[^A-Za-z]/g, '').slice(0, 3).toUpperCase() || 'X'}`;
+  }, [s.client.entreprise]);
+
+  const answer = (q, o) => set(p => {
+    const cur = p.reponses[q.id] || [];
+    const next = q.multi ? (cur.includes(o) ? cur.filter(x => x !== o) : [...cur, o]) : (cur.includes(o) ? [] : [o]);
+    return { reponses: { ...p.reponses, [q.id]: next } };
+  });
+
+  const addPhotos = async (files) => {
+    const out = [];
+    for (const f of files) { try { out.push(await compress(f, 1400, 0.8)); } catch {} }
+    set(p => ({ visuels: { ...p.visuels, photos: [...p.visuels.photos, ...out].slice(0, 12) } }));
+  };
+  const addLogo = async (f) => { if (!f) return; try { const d = await compress(f, 600, 0.9); set(p => ({ visuels: { ...p.visuels, logo: d } })); } catch { toast('Image illisible.'); } };
+
+  const nouveauClient = () => {
+    if (!confirm('Commencer un nouveau client ? La fiche, les réponses, la sélection et les visuels seront effacés. Vos tarifs et vos coordonnées sont conservés.')) return;
+    set(p => ({ ...DEFAULTS, client: blankClient, visuels: { logo: '', photos: [], demoUrl: '' }, prestations: p.prestations.map(x => ({ ...x, selected: false, pack: false })), vendeur: p.vendeur,
+      inclus: p.inclus, paiement: p.paiement, validite: p.validite, tva: p.tva, packNom: p.packNom }));
+    setOpen({ client: true });
+  };
+
+  const addCustom = (type) => set(p => ({ prestations: [...p.prestations, { id: 'perso-' + Date.now(), type, nom: 'Nouvelle prestation', description: 'Description de la prestation', prix: 0, qte: 1, unite: '', selected: true, pack: false }] }));
+
+  const answered = QUESTIONS.filter(q => (s.reponses[q.id] || []).length || (s.notes[q.id] || '').trim());
+  const clientHint = [s.client.entreprise, s.client.responsable].filter(Boolean).join(' · ') || 'Coordonnées du commerçant';
+
+  const generate = () => {
+    if (!c.sel.length) { toast('Cochez au moins une prestation avant de générer la proposition.'); setOpen(o => ({ ...o, offre: true })); return; }
+    setShowProposal(true);
+    window.scrollTo(0, 0);
+  };
+
+  // appelée comme une fonction (et non <RemiseInput/>) pour que le champ garde le focus pendant la saisie
+  const remiseInput = (k, label) => (
+    <div>
+      <p className="mb-1.5 text-xs font-medium uppercase tracking-wide text-gray-500">{label}</p>
+      <div className="flex items-center gap-2">
+        <input type="number" inputMode="decimal" min="0" value={s.remises[k].valeur}
+          onChange={e => set(p => ({ remises: { ...p.remises, [k]: { ...p.remises[k], valeur: e.target.value } } }))}
+          className={inputCls + ' tabular w-28'} />
+        <Segmented value={s.remises[k].mode} options={[{ v: '%', label: '%' }, { v: '€', label: '€' }]}
+          onChange={v => set(p => ({ remises: { ...p.remises, [k]: { ...p.remises[k], mode: v } } }))} />
+      </div>
+    </div>
+  );
+
+  return (
+    <>
+      <div id="app-main">
+        {/* Récapitulatif permanent */}
+        <div className="sticky top-0 z-40 border-b border-gray-200 bg-white/90 backdrop-blur" style={{ paddingTop: 'env(safe-area-inset-top)' }}>
+          <div className="mx-auto flex max-w-5xl items-center gap-3 px-4 py-2.5 sm:gap-6 sm:px-6">
+            <div className="grid flex-1 grid-cols-3 gap-2 sm:gap-6">
+              {[['Création initiale', eur(c.htP), eur(c.ttcP) + ' TTC'],
+                ['Mensualité', eur(c.htM), eur(c.ttcM) + ' TTC'],
+                [c.mois ? `Total ${c.mois} mois` : 'Total 1er mois', eur(c.totalHT), eur(c.totalTTC) + ' TTC']].map(([l, v, sub]) => (
+                <div key={l} className="min-w-0">
+                  <p className="truncate text-[10.5px] font-medium uppercase tracking-wide text-gray-500 sm:text-[11px]">{l}</p>
+                  <p className="tabular truncate text-[15px] font-semibold sm:text-lg">{v}<span className="ml-1 text-[10px] font-normal text-gray-400">HT</span></p>
+                  <p className="tabular hidden truncate text-[11px] text-gray-500 sm:block">{sub}</p>
+                </div>
+              ))}
+            </div>
+            <button onClick={generate} className="hidden rounded-xl bg-accent px-5 py-3 text-sm font-semibold text-white shadow-sm transition hover:brightness-110 sm:block">Générer la proposition</button>
+          </div>
+        </div>
+
+        <main className="mx-auto max-w-5xl space-y-4 px-4 pb-32 pt-6 sm:px-6">
+          <div className="flex flex-wrap items-end justify-between gap-3 pb-2">
+            <div>
+              <h1 className="font-display text-2xl font-semibold sm:text-3xl">Proposition commerciale</h1>
+              <p className="text-sm text-gray-500">Enregistrement automatique sur cet appareil.</p>
+            </div>
+            <button onClick={nouveauClient} className="rounded-xl border border-gray-200 bg-white px-3.5 py-2 text-sm font-medium text-gray-600 hover:bg-gray-50">Nouveau client</button>
+          </div>
+
+          {/* 1. Fiche client */}
+          <Section n="1" title="Fiche client" hint={clientHint} open={!!open.client} onToggle={() => toggle('client')}>
+            <div className="grid gap-4 sm:grid-cols-2">
+              <Field label="Nom de l'entreprise"><input className={inputCls} value={s.client.entreprise} onChange={e => setClient('entreprise', e.target.value)} placeholder="Boulangerie du Port" /></Field>
+              <Field label="Responsable"><input className={inputCls} value={s.client.responsable} onChange={e => setClient('responsable', e.target.value)} placeholder="Prénom Nom" autoComplete="off" /></Field>
+              <Field label="Téléphone"><input className={inputCls} type="tel" inputMode="tel" value={s.client.telephone} onChange={e => setClient('telephone', e.target.value)} placeholder="06 12 34 56 78" autoComplete="off" /></Field>
+              <Field label="Email"><input className={inputCls} type="email" inputMode="email" value={s.client.email} onChange={e => setClient('email', e.target.value)} placeholder="contact@commerce.fr" autoComplete="off" /></Field>
+              <Field label="Adresse" className="sm:col-span-2"><input className={inputCls} value={s.client.adresse} onChange={e => setClient('adresse', e.target.value)} placeholder="Rue, code postal, ville" autoComplete="off" /></Field>
+              <Field label="Secteur d'activité" className="sm:col-span-2">
+                <input className={inputCls} list="secteurs" value={s.client.secteur} onChange={e => setClient('secteur', e.target.value)} placeholder="Boulangerie, restaurant, coiffure…" />
+                <datalist id="secteurs">{['Boulangerie-pâtisserie', 'Restaurant', 'Café / bar', 'Salon de coiffure', 'Institut de beauté', 'Boutique de vêtements', 'Fleuriste', 'Épicerie fine', 'Boucherie', 'Artisan'].map(x => <option key={x} value={x} />)}</datalist>
+              </Field>
+            </div>
+          </Section>
+
+          {/* 2. Découverte */}
+          <Section n="2" title="Découverte commerciale" hint={answered.length ? `${answered.length} / ${QUESTIONS.length} questions renseignées` : 'Questions à poser pendant le rendez-vous'}
+            open={!!open.decouverte} onToggle={() => toggle('decouverte')}>
+            <div className="space-y-6">
+              {QUESTIONS.map((q, i) => (
+                <div key={q.id}>
+                  <p className="font-medium"><span className="mr-2 text-gray-400">{i + 1}.</span>{q.q}{q.multi && <span className="ml-2 text-xs font-normal text-gray-400">plusieurs choix</span>}</p>
+                  <div className="mt-2.5 flex flex-wrap gap-2">
+                    {q.options.map(o => <Chip key={o} active={(s.reponses[q.id] || []).includes(o)} onClick={() => answer(q, o)}>{o}</Chip>)}
+                  </div>
+                  <input className={inputCls + ' mt-2.5 text-sm'} placeholder="Notes…" value={s.notes[q.id] || ''}
+                    onChange={e => set(p => ({ notes: { ...p.notes, [q.id]: e.target.value } }))} />
+                </div>
+              ))}
+
+              {answered.length > 0 && (
+                <div className="rounded-2xl bg-gray-50 p-5">
+                  <p className="font-display text-lg font-semibold">Synthèse des besoins</p>
+                  <ul className="mt-3 space-y-2 text-sm">
+                    {answered.map(q => (
+                      <li key={q.id}>
+                        <span className="text-gray-500">{q.q.replace(' ?', '')} : </span>
+                        <span className="font-medium">{(s.reponses[q.id] || []).join(', ') || '—'}</span>
+                        {(s.notes[q.id] || '').trim() && <span className="text-gray-600"> · {s.notes[q.id]}</span>}
+                      </li>
+                    ))}
+                  </ul>
+                  {sugg.size > 0 && (
+                    <div className="mt-4 flex flex-wrap items-center gap-3 border-t border-gray-200 pt-4">
+                      <p className="text-sm text-gray-600"><span className="font-semibold text-ink">{sugg.size} prestations</span> correspondent à ces besoins.</p>
+                      <button className="rounded-xl bg-ink px-3.5 py-2 text-sm font-semibold text-white"
+                        onClick={() => { set(p => ({ prestations: p.prestations.map(x => sugg.has(x.id) ? { ...x, selected: true } : x) })); setOpen(o => ({ ...o, offre: true })); toast('Prestations suggérées cochées. Ajustez-les dans le constructeur d\'offre.'); }}>
+                        Cocher les suggestions
+                      </button>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          </Section>
+
+          {/* 3. Constructeur d'offre */}
+          <Section n="3" title="Constructeur d'offre" hint={c.sel.length ? `${c.sel.length} prestation${c.sel.length > 1 ? 's' : ''} sélectionnée${c.sel.length > 1 ? 's' : ''}` : 'Cochez les prestations, ajustez prix et descriptions'}
+            open={!!open.offre} onToggle={() => toggle('offre')}>
+            {[['ponctuel', 'Prestations ponctuelles'], ['mensuel', 'Prestations mensuelles']].map(([type, title]) => (
+              <div key={type} className="mb-8 last:mb-0">
+                <div className="mb-3 flex items-baseline justify-between">
+                  <h3 className="font-display text-lg font-semibold">{title}</h3>
+                  <span className="tabular text-sm text-gray-500">{type === 'ponctuel' ? eur(c.brutP) + ' HT' : eur(c.brutM) + ' HT / mois'}</span>
+                </div>
+                <div className="grid gap-3 lg:grid-cols-2">
+                  {s.prestations.filter(p => p.type === type).map(p => (
+                    <PrestationCard key={p.id} p={p} suggested={sugg.has(p.id)} onChange={patch => setPrest(p.id, patch)}
+                      onRemove={p.id.startsWith('perso-') ? () => set(prev => ({ prestations: prev.prestations.filter(x => x.id !== p.id) })) : null} />
+                  ))}
+                </div>
+                <button onClick={() => addCustom(type)} className="mt-3 text-sm font-medium text-accent hover:underline">+ Ajouter une prestation {type === 'mensuel' ? 'mensuelle' : 'ponctuelle'}</button>
+              </div>
+            ))}
+            <div className="mt-6 flex flex-wrap items-center gap-3 rounded-2xl bg-gray-50 p-4">
+              <span className="text-sm text-gray-600">Nom du pack :</span>
+              <input className={inputCls + ' w-56'} value={s.packNom} onChange={e => set({ packNom: e.target.value })} />
+              <span className="text-sm text-gray-500">{c.sel.filter(p => p.pack).length} prestation(s) dans le pack</span>
+            </div>
+          </Section>
+
+          {/* 4. Tarifs et remises */}
+          <Section n="4" title="Tarifs et remises" hint={`TVA ${s.tva} % · ${c.mois ? 'engagement ' + c.mois + ' mois' : 'sans engagement'}${c.remP || c.remM ? ' · remise appliquée' : ''}`}
+            open={!!open.tarifs} onToggle={() => toggle('tarifs')}>
+            <div className="grid gap-6 lg:grid-cols-[1fr_340px]">
+              <div className="space-y-6">
+                <div className="grid gap-5 sm:grid-cols-2">
+                  {remiseInput('ponctuel', 'Remise sur la création')}
+                  {remiseInput('mensuel', 'Remise sur les mensualités')}
+                </div>
+                <div>
+                  <p className="mb-1.5 text-xs font-medium uppercase tracking-wide text-gray-500">Durée d'engagement</p>
+                  <div className="flex flex-wrap gap-2">{ENGAGEMENTS.map(e => <Chip key={e.v} active={s.engagement === e.v} onClick={() => set({ engagement: e.v })}>{e.label}</Chip>)}</div>
+                </div>
+                <div className="grid gap-5 sm:grid-cols-3">
+                  <Field label="TVA (%)"><input type="number" inputMode="decimal" min="0" className={inputCls + ' tabular'} value={s.tva} onChange={e => set({ tva: e.target.value })} /></Field>
+                  <Field label="Validité du devis (jours)"><input type="number" inputMode="numeric" min="1" className={inputCls + ' tabular'} value={s.validite} onChange={e => set({ validite: e.target.value })} /></Field>
+                  <div>
+                    <p className="mb-1.5 text-xs font-medium uppercase tracking-wide text-gray-500">Acompte</p>
+                    <div className="flex items-center gap-2">
+                      <input type="checkbox" checked={s.acompte.actif} onChange={e => set(p => ({ acompte: { ...p.acompte, actif: e.target.checked } }))} className="h-5 w-5 accent-[#1f3a5f]" aria-label="Activer l'acompte" />
+                      <input type="number" inputMode="decimal" min="0" max="100" disabled={!s.acompte.actif} className={inputCls + ' tabular w-24 disabled:bg-gray-50 disabled:text-gray-400'} value={s.acompte.pct}
+                        onChange={e => set(p => ({ acompte: { ...p.acompte, pct: e.target.value } }))} />
+                      <span className="text-sm text-gray-500">%</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+              <div className="rounded-2xl bg-gray-50 p-5 text-sm">
+                {[['Création HT', eur(c.brutP)], c.remP ? ['Remise création', '−' + eur(c.remP)] : null, ['Création TTC', eur(c.ttcP)],
+                  ['Mensualité HT', eur(c.brutM)], c.remM ? ['Remise mensuelle', '−' + eur(c.remM)] : null, ['Mensualité TTC', eur(c.ttcM)]]
+                  .filter(Boolean).map(([l, v]) => <div key={l} className="flex justify-between py-1"><span className="text-gray-600">{l}</span><span className="tabular font-medium">{v}</span></div>)}
+                <div className="mt-2 border-t border-gray-200 pt-2">
+                  <div className="flex justify-between py-1 font-semibold"><span>{c.mois ? `Total ${c.mois} mois TTC` : 'Total 1er mois TTC'}</span><span className="tabular">{eur(c.totalTTC)}</span></div>
+                  {c.acompte > 0 && <div className="flex justify-between py-1 text-gray-600"><span>Acompte ({s.acompte.pct} %)</span><span className="tabular">{eur(c.acompte)}</span></div>}
+                </div>
+              </div>
+            </div>
+          </Section>
+
+          {/* 5. Visuels */}
+          <Section n="5" title="Visuels et démonstration" hint={[s.visuels.logo && 'logo', s.visuels.photos.length && `${s.visuels.photos.length} photo(s)`, s.visuels.demoUrl && 'site de démo'].filter(Boolean).join(' · ') || 'Logo, photos du commerce, site de démonstration'}
+            open={!!open.visuels} onToggle={() => toggle('visuels')}>
+            <div className="grid gap-6 sm:grid-cols-[200px_1fr]">
+              <div>
+                <p className="mb-1.5 text-xs font-medium uppercase tracking-wide text-gray-500">Logo</p>
+                <label className="grid aspect-square cursor-pointer place-items-center overflow-hidden rounded-2xl border border-dashed border-gray-300 bg-gray-50 text-sm text-gray-500 hover:border-gray-400">
+                  {s.visuels.logo ? <img src={s.visuels.logo} alt="Logo" className="max-h-full max-w-full object-contain p-4" /> : <span>Ajouter le logo</span>}
+                  <input type="file" accept="image/*" className="hidden" onChange={e => addLogo(e.target.files[0])} />
+                </label>
+                {s.visuels.logo && <button onClick={() => set(p => ({ visuels: { ...p.visuels, logo: '' } }))} className="mt-2 text-xs text-gray-400 hover:text-red-600">Retirer</button>}
+              </div>
+              <div>
+                <p className="mb-1.5 text-xs font-medium uppercase tracking-wide text-gray-500">Photos du commerce</p>
+                <div className="grid grid-cols-3 gap-2 sm:grid-cols-4">
+                  {s.visuels.photos.map((ph, i) => (
+                    <div key={i} className="group relative">
+                      <button onClick={() => setPreview(i)} className="block w-full"><img src={ph} alt="" className="aspect-square w-full rounded-xl object-cover" /></button>
+                      <button onClick={() => set(p => ({ visuels: { ...p.visuels, photos: p.visuels.photos.filter((_, j) => j !== i) } }))}
+                        className="absolute right-1.5 top-1.5 grid h-7 w-7 place-items-center rounded-full bg-black/60 text-white" aria-label="Retirer la photo">×</button>
+                    </div>
+                  ))}
+                  <label className="grid aspect-square cursor-pointer place-items-center rounded-xl border border-dashed border-gray-300 bg-gray-50 text-center text-sm text-gray-500 hover:border-gray-400">
+                    <span>+ Photos<br /><span className="text-xs">appareil ou galerie</span></span>
+                    <input type="file" accept="image/*" multiple className="hidden" onChange={e => addPhotos([...e.target.files])} />
+                  </label>
+                </div>
+              </div>
+            </div>
+            <div className="mt-6 flex flex-wrap items-end gap-3">
+              <Field label="Site internet de démonstration" className="min-w-[240px] flex-1">
+                <input className={inputCls} type="url" inputMode="url" value={s.visuels.demoUrl} onChange={e => set(p => ({ visuels: { ...p.visuels, demoUrl: e.target.value.trim() } }))} placeholder="https://…" />
+              </Field>
+              {s.visuels.demoUrl && <a href={s.visuels.demoUrl} target="_blank" rel="noopener" className="rounded-xl bg-ink px-4 py-2.5 text-sm font-semibold text-white">Ouvrir la démo</a>}
+            </div>
+          </Section>
+
+          {/* 6. Contenu de la proposition */}
+          <Section n="6" title="Contenu de la proposition" hint="Présentation, services inclus, paiement, vos coordonnées" open={!!open.contenu} onToggle={() => toggle('contenu')}>
+            <div className="space-y-5">
+              <Field label="Présentation du projet (laisser vide pour un texte automatique)">
+                <textarea rows={3} className={inputCls} value={s.presentation} onChange={e => set({ presentation: e.target.value })} placeholder="Quelques lignes sur le projet du client…" />
+              </Field>
+              <div className="grid gap-5 sm:grid-cols-2">
+                <Field label="Maintenance et services inclus (une ligne par élément)"><textarea rows={5} className={inputCls} value={s.inclus} onChange={e => set({ inclus: e.target.value })} /></Field>
+                <Field label="Conditions de paiement"><textarea rows={5} className={inputCls} value={s.paiement} onChange={e => set({ paiement: e.target.value })} /></Field>
+              </div>
+              <div>
+                <p className="mb-3 text-xs font-medium uppercase tracking-wide text-gray-500">Vos coordonnées (conservées d'un client à l'autre)</p>
+                <div className="grid gap-4 sm:grid-cols-2">
+                  {[['nom', 'Votre nom'], ['societe', 'Votre société'], ['telephone', 'Téléphone'], ['email', 'Email'], ['siret', 'SIRET']].map(([k, l]) => (
+                    <Field key={k} label={l}><input className={inputCls} value={s.vendeur[k]} onChange={e => setVendeur(k, e.target.value)} /></Field>
+                  ))}
+                </div>
+              </div>
+            </div>
+          </Section>
+        </main>
+
+        {/* Bouton principal mobile */}
+        <div className="fixed inset-x-0 bottom-0 z-40 border-t border-gray-200 bg-white/95 p-3 backdrop-blur sm:hidden" style={{ paddingBottom: 'calc(.75rem + env(safe-area-inset-bottom))' }}>
+          <button onClick={generate} className="w-full rounded-xl bg-accent py-3.5 text-base font-semibold text-white shadow-sm active:brightness-110">Générer la proposition</button>
+        </div>
+
+        {preview !== null && (
+          <div className="fixed inset-0 z-[60] grid place-items-center bg-black/90 p-4" onClick={() => setPreview(null)}>
+            <img src={s.visuels.photos[preview]} alt="" className="max-h-[85vh] max-w-full rounded-lg object-contain" />
+            <p className="absolute bottom-6 text-sm text-white/70">Touchez pour fermer</p>
+          </div>
+        )}
+      </div>
+
+      {showProposal && <Proposal s={s} c={c} numero={numero} onClose={() => setShowProposal(false)} toast={toast} />}
+      <Toast msg={msg} />
+    </>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+</script>
+</body>
+</html>
