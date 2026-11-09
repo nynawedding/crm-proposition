@@ -700,10 +700,16 @@ function Proposal({ s, c, cTous, numero, onClose, toast, onExclu, onChoix, onDev
   // listes complètes (pour pouvoir recocher) ; prix calculés sur ce qui reste coché
   const tous = formule ? c.offres : cTous.offres;
   const principaux = tous.filter(o => o.id !== 'fidel'), option = tous.find(o => o.id === 'fidel');
-  const prixBloc = (o) => c.offres.find(x => x.id === o.id) || { ttcP: 0, ttcM: 0 };
+  // en formule : lignes et sous-totaux au prix du CRM (à la carte), pour que la remise affichée soit réelle
+  const prixBloc = (o) => {
+    const r = c.offres.find(x => x.id === o.id) || { bP: 0, bM: 0, htP: 0, htM: 0, ttcP: 0, ttcM: 0 };
+    if (!formule) return r;
+    const cat = (type) => r.items ? r.items.filter(p => (p.type === 'mensuel') === (type === 'mensuel')).reduce((a, p) => a + c.lineCat(p), 0) : 0;
+    return { ...r, bP: Math.max(cat('ponctuel'), r.htP), bM: Math.max(cat('mensuel'), r.htM) };
+  };
   const sommeL = (arr) => arr.reduce((a, p) => a + c.line(p), 0);
   const kP = sommeL(c.ponct) ? c.htP / sommeL(c.ponct) : 1, kM = sommeL(c.mens) ? c.htM / sommeL(c.mens) : 1;
-  const prixLigne = (p) => c.line(p); // prix HT du CRM (prix × quantité), la remise est affichée à part
+  const prixLigne = (p) => (formule ? c.lineCat(p) : c.line(p)); // prix HT du CRM (prix × quantité), la remise est affichée à part
   const carte = { exclus: formule ? {} : (s.exclus || {}), onToggle: formule ? null : onExclu, prixLigne, c };
   const ch = s.choisi || {};
   const choixPack = (id) => onChoix({ formule: null, packs: (ch.packs || []).includes(id) ? ch.packs.filter(x => x !== id) : [...(ch.packs || []), id] });
