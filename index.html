@@ -515,12 +515,10 @@ function PrestationCard({ p, suggested, onChange, onRemove, offres }) {
           <input value={p.unite || ''} onChange={e => onChange({ unite: e.target.value })} placeholder="journée…"
             className={inputCls + ' py-2 text-sm'} />
         </label>
-        <label className="w-36">
-          <span className="mb-1 block text-[11px] uppercase tracking-wide text-gray-500">Priorité</span>
-          <select value={prio(p)} onChange={e => onChange({ priorite: e.target.value })} className={inputCls + ' py-2 text-sm'}>
-            {PRIORITES.map(x => <option key={x.v} value={x.v}>{x.label}</option>)}
-          </select>
-        </label>
+        <div>
+          <span className="block text-[11px] uppercase tracking-wide text-gray-500">Priorité</span>
+          <ChoixPriorite value={prio(p)} onChange={v => onChange({ priorite: v })} />
+        </div>
         <label className="min-w-[150px]">
           <span className="mb-1 block text-[11px] uppercase tracking-wide text-gray-500">Dans l'offre</span>
           <select value={p.offre || 'base'} onChange={e => onChange({ offre: e.target.value })}
@@ -1119,7 +1117,7 @@ function PackCard({ pk, r, actif, ouvert, mois, onChoisir, onPerso }) {
   );
 }
 
-function PackEditor({ s, pk, r, actif, remiseInput, onPack, onItem, onSave, onReset, onChoisir }) {
+function PackEditor({ s, pk, r, actif, remiseInput, onPack, onItem, onSave, onReset, onChoisir, onPrio }) {
   const fld = (k, l, area) => (
     <Field label={l}>{area
       ? <textarea rows={4} className={inputCls + ' text-sm'} value={(pk[k] || []).join('\n')} onChange={e => onPack({ [k]: e.target.value.split('\n') })} />
@@ -1159,6 +1157,7 @@ function PackEditor({ s, pk, r, actif, remiseInput, onPack, onItem, onSave, onRe
                       <div className="min-w-[180px] flex-1">
                         <p className="text-sm font-medium leading-snug">{p.nom}</p>
                         <p className="tabular text-xs text-gray-500">À la carte : {eur(num(p.prix))} HT{p.unite ? ' / ' + p.unite : ''}</p>
+                        <ChoixPriorite value={prio(p)} onChange={v => onPrio(p.id, v)} />
                       </div>
                       {ligne && (
                         <div className="flex flex-wrap items-center gap-2">
@@ -1200,6 +1199,21 @@ function PackEditor({ s, pk, r, actif, remiseInput, onPack, onItem, onSave, onRe
         {!actif && <button onClick={onChoisir} className="rounded-xl bg-emerald-600 px-5 py-3 text-sm font-semibold text-white">Choisir cette formule</button>}
         <button onClick={onReset} className="rounded-xl border border-gray-200 px-4 py-3 text-sm font-medium text-gray-600 hover:bg-gray-50">Revenir à la composition d'origine</button>
       </div>
+    </div>
+  );
+}
+
+// Sélecteur de priorité affichée au client : Indispensable (verrouillé), Recommandé, Au choix.
+const PRIO_STYLE = { essentiel: 'bg-rose-600 text-white', recommande: 'bg-emerald-600 text-white', option: 'bg-slate-600 text-white' };
+function ChoixPriorite({ value, onChange }) {
+  return (
+    <div className="mt-1.5 inline-flex rounded-lg bg-gray-100 p-0.5" role="radiogroup" aria-label="Priorité">
+      {PRIORITES.map(x => (
+        <button key={x.v} type="button" role="radio" aria-checked={value === x.v} onClick={() => onChange(x.v)}
+          className={'rounded-md px-2 py-1 text-[11px] font-semibold transition ' + (value === x.v ? PRIO_STYLE[x.v] + ' shadow-sm' : 'text-gray-500 hover:text-ink')}>
+          {x.v === 'essentiel' ? '🔒 ' : ''}{x.label}
+        </button>
+      ))}
     </div>
   );
 }
@@ -1483,7 +1497,7 @@ function App() {
                 </div>
                 {perso && (() => {
                   const pk = s.packs.find(x => x.id === perso);
-                  return <PackEditor s={s} pk={pk} r={packsCalc[pk.id]} actif={s.pack === pk.id} remiseInput={remiseInput}
+                  return <PackEditor s={s} pk={pk} r={packsCalc[pk.id]} actif={s.pack === pk.id} remiseInput={remiseInput} onPrio={(id, v) => setPrest(id, { priorite: v })}
                     onPack={patch => setPack(pk.id, patch)} onItem={(id, val) => setPackItem(pk.id, id, val)}
                     onSave={() => { setPerso(''); toast(`${pk.nom} enregistré sur cet appareil.`); }}
                     onChoisir={() => choisir(pk.id)}
