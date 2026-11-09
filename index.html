@@ -1054,11 +1054,12 @@ function devisCalc(s, c) {
   const part = (type, kG) => {
     const groupes = blocs.map(o => ({ ...o, lignes: o.items.filter(p => (p.type === 'mensuel') === (type === 'mensuel')) })).filter(o => o.lignes.length);
     const brut = groupes.reduce((a, o) => a + somme(o.lignes), 0);
-    const remG = brut * (1 - kG), apres = brut - remG, remF = apres * r, ht = apres - remF;
-    return { groupes, brut, remG, remF, ht, tva: ht * t, ttc: ht * (1 + t) };
+    const c2 = (x) => Math.round(x * 100) / 100; // montants au centime : ce que le client paie vraiment
+    const remG = brut * (1 - kG), apres = brut - remG, remF = apres * r, ht = c2(apres - remF), ttc = c2(ht * (1 + t));
+    return { groupes, brut, remG, remF, ht, tva: ttc - ht, ttc };
   };
   const P = part('ponctuel', kP), M = part('mensuel', kM);
-  const acompte = s.acompte.actif ? P.ttc * num(s.acompte.pct) / 100 : 0;
+  const acompte = s.acompte.actif ? Math.round(P.ttc * num(s.acompte.pct)) / 100 : 0;
   const titre = k ? k.nom : blocs.map(o => o.nom).join(' + ');
   return { k, blocs, r, P, M, acompte, titre, mois: c.mois, totalTTC: P.ttc + M.ttc * (c.mois || 1) };
 }
@@ -1180,6 +1181,69 @@ function Devis({ s, d, numero, onBack, toast }) {
             <p className="ml-auto mt-2 max-w-[320px] text-right text-[12px] text-gray-500">{d.mois ? `Engagement de ${d.mois} mois, soit ${eur(d.M.ttc * d.mois)}${xTTC()} sur la durée.` : 'Sans engagement.'}</p>
           </section>
         )}
+
+        {/* Récapitulatif : ce que le client paie réellement, remises comprises */}
+        {(() => {
+          const n = d.mois || 1;
+          // prix net de chaque abonnement (remises comprises), le dernier centime d'arrondi va sur la dernière ligne
+          const abos = d.M.groupes.flatMap(o => o.lignes.map(p => ({ p, o })));
+          const kNet = d.M.brut ? d.M.ttc / d.M.brut : 1;
+          let reste = Math.round(d.M.ttc * 100) / 100;
+          const nets = abos.map(({ p, o }, i) => {
+            const v = i === abos.length - 1 ? reste : Math.round(num(p.prix) * Math.max(1, num(p.qte) || 1) * kNet * 100) / 100;
+            reste = Math.round((reste - v) * 100) / 100;
+            return { p, o, v };
+          });
+          const tech = nets.filter(x => estTechnique(x.p)), serv = nets.filter(x => !estTechnique(x.p));
+          const eco = d.P.remG + d.P.remF + (d.M.remG + d.M.remF) * n;
+          const bloc = (titre, l, cls) => l.length > 0 && (
+            <div className={'rounded-xl px-3 py-2 ' + cls}>
+              <p className="text-[11px] font-bold uppercase tracking-wider">{titre}</p>
+              <ul className="mt-1 space-y-0.5">{l.map(({ p, o, v }) => (
+                <li key={p.id} className="flex justify-between gap-3 text-[13px]">
+                  <span><span className="mr-1.5 inline-block h-2 w-2 rounded-full align-middle" style={{ background: COULEURS[o.id] }} />{p.court || p.nom}</span>
+                  <span className="tabular shrink-0 font-medium">{eur(v)} / mois</span>
+                </li>))}</ul>
+            </div>
+          );
+          return (
+            <section className="avoid-break mt-8 rounded-2xl border-2 border-ink p-5">
+              <h2 className="font-display text-xl font-semibold">Récapitulatif · ce que vous payez réellement</h2>
+              <p className="text-[12.5px] text-gray-500">{d.titre}, remises comprises{FRANCHISE ? '. ' + MENTION_TVA : ', TVA comprise'}.</p>
+              <div className="mt-4 grid gap-3 sm:grid-cols-3">
+                {d.P.ttc > 0 && (
+                  <div className="rounded-xl bg-gray-50 px-4 py-3">
+                    <p className="text-[11px] font-bold uppercase tracking-wider text-gray-500">Création · une seule fois</p>
+                    <p className="tabular font-display text-2xl font-bold">{eur(d.P.ttc)}</p>
+                    {d.acompte > 0 && <p className="tabular text-[12px] text-gray-600">{eur(d.acompte)} à la signature + {eur(d.P.ttc - d.acompte)} à la livraison</p>}
+                  </div>
+                )}
+                {d.M.ttc > 0 && (
+                  <div className="rounded-xl bg-sky-50 px-4 py-3 text-sky-950">
+                    <p className="text-[11px] font-bold uppercase tracking-wider text-sky-900/70">Abonnements · chaque mois</p>
+                    <p className="tabular font-display text-2xl font-bold">{eur(d.M.ttc)}</p>
+                    <p className="text-[12px] text-sky-900/80">{abos.length} abonnement{abos.length > 1 ? 's' : ''} souscrit{abos.length > 1 ? 's' : ''}, {d.mois ? `pendant ${d.mois} mois` : 'sans engagement'}</p>
+                  </div>
+                )}
+                <div className="rounded-xl bg-ink px-4 py-3 text-white">
+                  <p className="text-[11px] font-bold uppercase tracking-wider text-white/70">{d.mois ? `Total sur ${d.mois} mois` : 'Total avec le 1er mois'}</p>
+                  <p className="tabular font-display text-2xl font-bold">{eur(d.P.ttc + Math.round(d.M.ttc * 100) / 100 * n)}</p>
+                  <p className="tabular text-[12px] text-white/75">{[d.P.ttc > 0 && eur(d.P.ttc) + ' de création', d.M.ttc > 0 && `${n} × ${eur(d.M.ttc)}`].filter(Boolean).join(' + ')}</p>
+                </div>
+              </div>
+              {abos.length > 0 && (
+                <div className="mt-4">
+                  <p className="text-sm font-semibold">Vos abonnements souscrits, prix net par mois</p>
+                  <div className="mt-2 grid gap-2 sm:grid-cols-2">
+                    {bloc('⚙ Frais techniques', tech, 'bg-slate-100 text-slate-800')}
+                    {bloc('↻ Services', serv, 'bg-sky-50 text-sky-900')}
+                  </div>
+                </div>
+              )}
+              {eco > 0.5 && <p className="mt-3 rounded-xl bg-emerald-50 px-3 py-2 text-[13px] font-semibold text-emerald-800">🎁 Vous économisez {eur(eco)}{d.mois && d.M.ttc > 0 ? ` sur ${d.mois} mois` : ''} grâce aux remises.</p>}
+            </section>
+          );
+        })()}
 
         <section className="avoid-break mt-8 border-t border-gray-200 pt-5 text-[12.5px] text-gray-700">
           <p className="font-semibold text-ink">Conditions</p>
