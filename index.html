@@ -70,7 +70,7 @@ const OFFRE_PAR_DEFAUT = {
   tournage: 'base', montage: 'base',
   seo: 'web', suiviseo: 'web', site: 'web', hebergement: 'web', domaine: 'web', miseenligne: 'web', maintenance: 'web', majsite: 'web',
   planmkt: 'social', contenus: 'social', social: 'social', blog: 'social', reels: 'social', tiktok: 'social', reporting: 'social',
-  formulaire: 'fidel', sms: 'fidel', fidelite: 'fidel', qravis: 'fidel', saison: 'fidel',
+  sms: 'fidel', fidelite: 'fidel', qravis: 'fidel', saison: 'fidel',
 };
 // ancien bloc « Référencement Google » : rattaché à Visibilité web
 const remapOffre = (o) => (o === 'seo' ? 'web' : o);
@@ -93,9 +93,8 @@ const CATALOGUE = [
   { id: 'reels', type: 'mensuel', nom: 'Vidéos courtes pour les réseaux sociaux', description: "2 vidéos courtes par mois (Reels, Stories), tournées et montées pour Instagram et Facebook.", prix: 190, qte: 1, unite: 'mois' },
   { id: 'tiktok', type: 'mensuel', nom: 'Gestion TikTok', description: "Idées, tournage léger et publication de vidéos tendances, adaptées au commerce.", prix: 250, qte: 1, unite: 'mois' },
   { id: 'reporting', type: 'mensuel', nom: 'Suivi et reporting mensuel', description: "Tableau de bord clair : visites, appels, abonnés, avis, et recommandations du mois.", prix: 49, qte: 1, unite: 'mois' },
-  { id: 'formulaire', v: 2, garde: true, type: 'ponctuel', nom: 'Base clients et formulaire de collecte', description: "Formulaire sur le site et en boutique (QR code) pour constituer votre fichier clients, avec leur accord (RGPD).", prix: 190, qte: 1, unite: 'forfait' },
   { id: 'sms', v: 2, garde: true, type: 'mensuel', nom: 'Envoi de SMS aux clients', description: "Jusqu'à 2 campagnes par mois, envoyées uniquement aux clients qui ont donné leur accord. Coût d'envoi des SMS selon le volume.", prix: 59, qte: 1, unite: 'mois' },
-  { id: 'fidelite', type: 'ponctuel', nom: 'Programme de fidélité avec QR code', description: "Carte de fidélité digitale : le client scanne un QR code en caisse et cumule ses avantages.", prix: 290, qte: 1, unite: 'forfait' },
+  { id: 'fidelite', v: 2, type: 'ponctuel', nom: 'Base clients et programme de fidélité (QR code)', description: "Fichier clients constitué sur le site et en boutique, avec leur accord (RGPD), et carte de fidélité digitale : le client scanne un QR code en caisse et cumule ses avantages.", prix: 480, qte: 1, unite: 'forfait' },
   { id: 'qravis', v: 2, garde: true, type: 'ponctuel', nom: 'Avis Google avec étoiles (QR code)', description: "Présentoir de comptoir : le client scanne le QR code et laisse directement un avis avec étoiles sur Google.", prix: 49, qte: 1, unite: 'forfait' },
   { id: 'saison', v: 2, garde: true, type: 'mensuel', nom: 'Événements : Noël, anniversaires, spécial Ramadan', description: "Une opération par temps fort : visuels, publications, SMS et affichage en boutique. Lissé au mois.", prix: 90, qte: 1, unite: 'mois' },
 ].map(p => ({ ...p, selected: false, offre: OFFRE_PAR_DEFAUT[p.id] || 'base' }));
@@ -107,7 +106,7 @@ const CATALOGUE = [
 // Les ids internes (signature, premium, serenite) sont gardés pour les sauvegardes ; les noms suivent les packs vendus.
 const IDS_VISUEL_WEB = ['tournage', 'montage', 'seo', 'site', 'suiviseo', 'hebergement', 'domaine', 'miseenligne'];
 const IDS_CROISSANCE = [...IDS_VISUEL_WEB, 'planmkt', 'blog', 'contenus', 'social', 'reels'];
-const IDS_SERENITE = [...IDS_CROISSANCE, 'formulaire', 'sms', 'fidelite', 'qravis', 'saison', 'reporting'];
+const IDS_SERENITE = [...IDS_CROISSANCE, 'sms', 'fidelite', 'qravis', 'saison', 'reporting'];
 const toItems = (ids) => Object.fromEntries(ids.map(id => [id, {}]));
 const remiseDe = (x) => ({ ponctuel: { mode: '%', valeur: x }, mensuel: { mode: '%', valeur: x } });
 const PACKS = [
@@ -121,7 +120,7 @@ const PACKS = [
     items: toItems(IDS_CROISSANCE), remises: remiseDe(15) },
   { id: 'serenite', v: 2, nom: 'Pack Sérénité', sous: '+ fidélisation',
     promesse: 'Tout est géré : attirer de nouveaux clients et faire revenir les fidèles.',
-    points: ['Tout le Pack Croissance', 'Base clients et envoi de SMS', 'Programme de fidélité avec QR code', 'Avis Google avec étoiles', 'Événements : Noël, anniversaires, Ramadan', 'Suivi et reporting chaque mois'],
+    points: ['Tout le Pack Croissance', 'Base clients et programme de fidélité (QR code)', 'Envoi de SMS aux clients', 'Avis Google avec étoiles', 'Événements : Noël, anniversaires, Ramadan', 'Suivi et reporting chaque mois'],
     items: toItems(IDS_SERENITE), remises: remiseDe(20) },
 ];
 
@@ -231,6 +230,12 @@ const load = () => {
         ...(p.garde && st.prix !== undefined ? { prix: st.prix, qte: st.qte, unite: st.unite } : {}) } : st;
       // l'ancienne « fiche Google » (gbp) est fusionnée dans « Mise en place du référencement Google »
       if (p.id === 'seo' && stocke('gbp').selected) base.selected = true;
+      // « Base clients » (formulaire) fusionnée dans le programme de fidélité : prix additionnés, coché si l'un des deux l'était
+      if (p.id === 'fidelite' && st.v !== p.v && stocke('formulaire').id) {
+        const f = stocke('formulaire');
+        base.selected = !!(st.selected || f.selected);
+        base.prix = num(st.prix ?? 290) + num(f.prix ?? 190);
+      }
       // blocs réorganisés (v4) : chaque prestation du catalogue reprend son bloc par défaut une fois
       const offre = blocsV4 ? remapOffre(base.offre) : p.offre;
       return { ...p, ...base, offre: valide(offre) ? offre : p.offre };
