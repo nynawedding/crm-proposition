@@ -363,7 +363,7 @@ const qteLabel = (p) => { const t = qteTexte(p); return /^\d+$/.test(t) ? '× ' 
 const PARENTS = { signature: ['photo', 'siteweb'], premium: ['signature'], serenite: ['premium'] };
 const fusion = (base, propres) => {
   const res = { ...base };
-  Object.entries(propres || {}).forEach(([id, o]) => { if (o && o.retire) delete res[id]; else res[id] = { ...(res[id] || {}), ...o }; });
+  Object.entries(propres || {}).forEach(([id, o]) => { if (o && (o.retire || o.off)) delete res[id]; else res[id] = { ...(res[id] || {}), ...o }; });
   return res;
 };
 // prestations héritées des formules parentes
@@ -376,6 +376,15 @@ function itemsHerites(s, pk, vus = new Set()) {
   }, {});
 }
 const itemsEffectifs = (s, pk) => (pk ? fusion(itemsHerites(s, pk), pk.items) : {});
+// toutes les prestations proposées dans le pack, cochées ou non (pour les garder visibles)
+function membresPack(s, pk, vus = new Set()) {
+  const m = new Set();
+  if (!pk || !pk.id || vus.has(pk.id)) return m;
+  vus.add(pk.id);
+  (PARENTS[pk.id] || []).forEach(pid => { const par = (s.packs || []).find(x => x.id === pid); if (par) membresPack(s, par, vus).forEach(i => m.add(i)); });
+  Object.keys(pk.items || {}).forEach(i => m.add(i));
+  return m;
+}
 
 const packLines = (s, pack) => !pack ? [] : (() => { const eff = itemsEffectifs(s, pack); return s.prestations
   .filter(p => eff[p.id])
@@ -1224,12 +1233,21 @@ function PackEditor({ s, pk, r, actif, remiseInput, onPack, onItem, onSave, onRe
       <p className="mt-6 text-xs font-medium uppercase tracking-wide text-gray-500">Prestations du pack</p>
       {parents.length > 0 && <p className="mt-1 text-xs text-gray-500">Ce pack reprend automatiquement {parents.join(' + ')} : ce que vous y changez se répercute ici.</p>}
       <div className="mt-2 space-y-5">
-        {(s.offres || OFFRES).map(o => {
-          const items = s.prestations.filter(p => (p.offre || 'base') === o.id && eff[p.id]);
-          if (!items.length) return null;
-          return (
-            <div key={o.id}>
-              <p className="border-b border-gray-100 pb-1 text-sm font-semibold">{o.nom}</p>
+        {(() => {
+          const membres = membresPack(s, pk);
+          const tous = s.prestations.filter(p => membres.has(p.id));
+          const typeDe = (p) => (eff[p.id] && eff[p.id].type) || p.type;
+          const groupes = [
+            ['creation', 'Création · payée une fois', 'Ce que nous réalisons', tous.filter(p => typeDe(p) !== 'mensuel')],
+            ['technique', '⚙ Frais techniques · par mois', 'Nécessaires au fonctionnement du site', tous.filter(p => typeDe(p) === 'mensuel' && estTechnique(p))],
+            ['services', '↻ Services · par mois', 'Notre travail chaque mois', tous.filter(p => typeDe(p) === 'mensuel' && !estTechnique(p))],
+          ];
+          return groupes.filter(g => g[3].length).map(([k, titre, sous, items]) => (
+            <div key={k} className={k === 'creation' ? '' : 'rounded-2xl p-3 ' + (k === 'technique' ? 'bg-slate-50' : 'bg-sky-50/60')}>
+              <div className="flex items-baseline justify-between gap-2 border-b border-gray-200/70 pb-1">
+                <p className="text-sm font-bold">{titre}</p>
+                <p className="text-xs text-gray-500">{sous} · {items.filter(p => eff[p.id]).length}/{items.length} cochée{items.length > 1 ? 's' : ''}</p>
+              </div>
               <div className="divide-y divide-gray-100">
                 {items.map(p => {
                   const it = eff[p.id];
@@ -1245,6 +1263,7 @@ function PackEditor({ s, pk, r, actif, remiseInput, onPack, onItem, onSave, onRe
                         <p className="tabular text-xs text-gray-500">À la carte : {eur(num(p.prix))} HT{p.unite ? ' / ' + p.unite : ''}</p>
                         <ChoixPriorite value={prio(p)} onChange={v => onPrio(p.id, v)} />
                       </div>
+                      {!ligne && <span className="tabular ml-auto text-right text-sm text-gray-400">{eur(num(p.prix))}<span className="block text-[11px]">non inclus</span></span>}
                       {ligne && (
                         <div className="flex flex-wrap items-center gap-2">
                           <div className="relative w-24">
@@ -1264,15 +1283,16 @@ function PackEditor({ s, pk, r, actif, remiseInput, onPack, onItem, onSave, onRe
                 })}
               </div>
             </div>
-          );
-        })}
+          ));
+        })()}
         {!Object.keys(eff).length && <p className="text-sm text-gray-500">Aucune prestation : ajoutez-en ci-dessous.</p>}
       </div>
 
       {/* Ajouter une prestation : d'abord celles du même domaine, le reste du catalogue sur demande */}
       {(() => {
         const domaines = pk.blocs || [...new Set(s.prestations.filter(p => eff[p.id]).map(p => p.offre || 'base'))];
-        const dispo = s.prestations.filter(p => !eff[p.id] && (tout || domaines.includes(p.offre || 'base')));
+        const membresP = membresPack(s, pk);
+        const dispo = s.prestations.filter(p => !membresP.has(p.id) && (tout || domaines.includes(p.offre || 'base')));
         return (
           <div className="mt-4">
             {!ajout ? (
@@ -1439,8 +1459,10 @@ function App() {
     const x = p.packs.find(k => k.id === id);
     const items = { ...x.items };
     const herite = itemsHerites(p, x)[prestId];
-    if (val === null) { if (herite) items[prestId] = { retire: true }; else delete items[prestId]; }
-    else items[prestId] = val;
+    const cur = items[prestId];
+    if (val === null) items[prestId] = herite ? { retire: true } : { ...(cur || {}), off: true };   // décoché : reste dans la liste
+    else if (cur && cur.retire && herite && !Object.keys(val).length) delete items[prestId];           // recoché : reprend la formule parente
+    else { const { off, retire, ...reste } = val; items[prestId] = cur && cur.off && !Object.keys(val).length ? (({ off: o, ...r }) => r)(cur) : reste; }
     return { packs: p.packs.map(k => k.id === id ? { ...k, items } : k) };
   });
   const allerOffre = () => { setOpen(o => ({ ...o, offre: true })); setTimeout(() => document.getElementById('offre')?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 30); };
