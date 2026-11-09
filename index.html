@@ -129,23 +129,23 @@ const IDS_SERENITE = [...IDS_CROISSANCE, 'sms', 'fidelite', 'qravis', 'saison', 
 const toItems = (ids) => Object.fromEntries(ids.map(id => [id, {}]));
 const remiseDe = (x) => ({ ponctuel: { mode: '%', valeur: x }, mensuel: { mode: '%', valeur: x } });
 const PACKS = [
-  { id: 'photo', v: 1, groupe: 'unite', nom: 'Pack Photo-Vidéo', sous: 'Uniquement la création visuelle',
+  { id: 'photo', blocs: ['base'], v: 1, groupe: 'unite', nom: 'Pack Photo-Vidéo', sous: 'Uniquement la création visuelle',
     promesse: 'Une journée de tournage dans votre boutique et le montage de vos vidéos, prêtes pour vos écrans et vos réseaux.',
     points: ['Tournage photo et vidéo sur place (1 journée)', 'Montage vidéo (1 journée)', 'Vidéos prêtes pour vos écrans en boutique', 'Photos et vidéos pour vos réseaux'],
     items: toItems(['tournage', 'montage']), remises: remiseDe(0) },
-  { id: 'siteweb', v: 1, groupe: 'unite', nom: 'Pack Site Web', sous: 'Uniquement le site internet',
+  { id: 'siteweb', blocs: ['web'], v: 1, groupe: 'unite', nom: 'Pack Site Web', sous: 'Uniquement le site internet',
     promesse: 'Votre site à votre image, en ligne sur votre propre adresse.',
     points: ['Création du site sur mesure, adapté au téléphone', 'Nom de domaine (votre adresse internet)', 'Mise en ligne et configuration', 'Hébergement du site'],
     items: toItems(['site', 'domaine', 'miseenligne', 'hebergement']), remises: remiseDe(0) },
-  { id: 'signature', v: 2, nom: 'Pack Premium', sous: 'Photo-vidéo + visibilité web',
+  { id: 'signature', blocs: ['base', 'web'], v: 2, nom: 'Pack Premium', sous: 'Photo-vidéo + visibilité web',
     promesse: 'De belles images de votre boutique et un commerce bien visible sur Google.',
     points: ['Tournage photo et vidéo dans votre boutique', 'Montage vidéo de vos images', 'Fiche Google My Business optimisée', 'Votre site internet, hébergé, avec nom de domaine'],
     items: toItems(IDS_VISUEL_WEB), remises: remiseDe(10) },
-  { id: 'premium', v: 2, nom: 'Pack Croissance', sous: '+ communication', recommande: true,
+  { id: 'premium', blocs: ['base', 'web', 'social'], v: 2, nom: 'Pack Croissance', sous: '+ communication', recommande: true,
     promesse: 'Tout le Premium, et nous communiquons pour vous faire gagner de nouveaux clients.',
     points: ['Tout le Pack Premium', 'Plan marketing médias et réseaux sociaux', 'Contenus créés et publiés pour vous', 'Articles de blog pour Google', 'Vidéos courtes pour les réseaux'],
     items: toItems(IDS_CROISSANCE), remises: remiseDe(15) },
-  { id: 'serenite', v: 2, nom: 'Pack Sérénité', sous: '+ fidélisation',
+  { id: 'serenite', blocs: ['base', 'web', 'social', 'fidel'], v: 2, nom: 'Pack Sérénité', sous: '+ fidélisation',
     promesse: 'Tout est géré : attirer de nouveaux clients et faire revenir les fidèles.',
     points: ['Tout le Pack Croissance', 'Base clients et programme de fidélité (QR code)', 'Envoi de SMS aux clients', 'Avis Google avec étoiles', 'Événements : Noël, anniversaires, Ramadan', 'Suivi et reporting chaque mois'],
     items: toItems(IDS_SERENITE), remises: remiseDe(20) },
@@ -1164,6 +1164,7 @@ function PackCard({ pk, r, actif, ouvert, mois, onChoisir, onPerso }) {
 }
 
 function PackEditor({ s, pk, r, actif, remiseInput, onPack, onItem, onSave, onReset, onChoisir, onPrio }) {
+  const [ajout, setAjout] = useState(false), [tout, setTout] = useState(false);
   const fld = (k, l, area) => (
     <Field label={l}>{area
       ? <textarea rows={4} className={inputCls + ' text-sm'} value={(pk[k] || []).join('\n')} onChange={e => onPack({ [k]: e.target.value.split('\n') })} />
@@ -1185,7 +1186,7 @@ function PackEditor({ s, pk, r, actif, remiseInput, onPack, onItem, onSave, onRe
       <p className="mt-6 text-xs font-medium uppercase tracking-wide text-gray-500">Prestations du pack</p>
       <div className="mt-2 space-y-5">
         {(s.offres || OFFRES).map(o => {
-          const items = s.prestations.filter(p => (p.offre || 'base') === o.id);
+          const items = s.prestations.filter(p => (p.offre || 'base') === o.id && pk.items[p.id]);
           if (!items.length) return null;
           return (
             <div key={o.id}>
@@ -1195,7 +1196,7 @@ function PackEditor({ s, pk, r, actif, remiseInput, onPack, onItem, onSave, onRe
                   const it = pk.items[p.id];
                   const ligne = it ? packLines(s, { items: { [p.id]: it } })[0] : null;
                   return (
-                    <div key={p.id} className={'flex flex-wrap items-center gap-x-3 gap-y-2 py-2.5 ' + (it ? '' : 'opacity-60')}>
+                    <div key={p.id} className={'flex flex-wrap items-center gap-x-3 gap-y-2 py-2.5 ' + ''}>
                       <button type="button" onClick={() => onItem(p.id, it ? null : {})} aria-pressed={!!it}
                         className={'grid h-6 w-6 shrink-0 place-items-center rounded-md border transition ' + (it ? 'border-accent bg-accent text-white' : 'border-gray-300 bg-white')}>
                         {it && <svg className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor"><path fillRule="evenodd" d="M16.7 5.3a1 1 0 010 1.4l-7.5 7.5a1 1 0 01-1.4 0l-3.5-3.5a1 1 0 111.4-1.4l2.8 2.8 6.8-6.8a1 1 0 011.4 0z" clipRule="evenodd"/></svg>}
@@ -1226,7 +1227,42 @@ function PackEditor({ s, pk, r, actif, remiseInput, onPack, onItem, onSave, onRe
             </div>
           );
         })}
+        {!Object.keys(pk.items).length && <p className="text-sm text-gray-500">Aucune prestation : ajoutez-en ci-dessous.</p>}
       </div>
+
+      {/* Ajouter une prestation : d'abord celles du même domaine, le reste du catalogue sur demande */}
+      {(() => {
+        const domaines = pk.blocs || [...new Set(s.prestations.filter(p => pk.items[p.id]).map(p => p.offre || 'base'))];
+        const dispo = s.prestations.filter(p => !pk.items[p.id] && (tout || domaines.includes(p.offre || 'base')));
+        return (
+          <div className="mt-4">
+            {!ajout ? (
+              <button onClick={() => setAjout(true)} className="rounded-xl border-2 border-dashed border-gray-300 px-4 py-2.5 text-sm font-semibold text-accent hover:border-accent hover:bg-accent-soft/40">+ Ajouter une prestation</button>
+            ) : (
+              <div className="rounded-2xl border border-gray-200 bg-gray-50 p-3">
+                <div className="flex flex-wrap items-center justify-between gap-2 px-1 pb-2">
+                  <p className="text-sm font-semibold">Ajouter une prestation{tout ? '' : ' de ce domaine'}</p>
+                  <div className="flex gap-3 text-sm">
+                    <button onClick={() => setTout(!tout)} className="font-medium text-accent hover:underline">{tout ? 'Ce domaine seulement' : 'Voir tout le catalogue'}</button>
+                    <button onClick={() => { setAjout(false); setTout(false); }} className="text-gray-500 hover:text-ink">Fermer</button>
+                  </div>
+                </div>
+                {dispo.length ? (
+                  <div className="divide-y divide-gray-100 overflow-hidden rounded-xl bg-white">
+                    {dispo.map(p => (
+                      <button key={p.id} onClick={() => onItem(p.id, {})} className="flex w-full items-center gap-3 px-3 py-2.5 text-left hover:bg-gray-50">
+                        <span className="grid h-6 w-6 shrink-0 place-items-center rounded-md bg-accent text-sm font-bold text-white">+</span>
+                        <span className="min-w-0 flex-1 text-sm font-medium">{p.nom}</span>
+                        <span className="tabular shrink-0 text-xs text-gray-500">{eur(num(p.prix))} HT{p.type === 'mensuel' ? ' / mois' : ''}</span>
+                      </button>
+                    ))}
+                  </div>
+                ) : <p className="px-1 text-sm text-gray-500">Toutes les prestations {tout ? 'du catalogue' : 'de ce domaine'} sont déjà dans le pack.</p>}
+              </div>
+            )}
+          </div>
+        );
+      })()}
 
       <div className="mt-6 grid gap-5 lg:grid-cols-[1fr_1.2fr]">
         <div className="space-y-4">
