@@ -703,9 +703,9 @@ function Proposal({ s, c, numero, onClose, toast }) {
                       {k.blocs.map(o => <span key={o.id} className="rounded-full px-2.5 py-0.5 text-[11px] font-semibold text-white ring-1 ring-white/30" style={{ background: COULEURS[o.id] }}>{o.nom.replace(/^(Pack|Option)\s+/, '').split(' & ')[0]}</span>)}
                     </div>
                     <div className="tabular mt-auto pt-4">
-                      {k.bP > 0 && <p><span className={'mr-2 text-sm line-through ' + (fort ? 'text-white/60' : 'text-gray-400')}>{eur(k.bP)}</span><span className="font-display text-[28px] font-semibold leading-none">{eur(k.htP)}</span><span className={'ml-1 text-xs ' + (fort ? 'text-white/70' : 'text-gray-500')}>HT</span></p>}
+                      {k.bP > 0 && <p><span className={'mr-2 text-sm line-through ' + (fort ? 'text-white/60' : 'text-gray-400')}>{eur(k.bP)}</span><span className="font-display text-[28px] font-semibold leading-none">{eur(k.htP)}</span><span className={'ml-1 text-xs ' + (fort ? 'text-white/70' : 'text-gray-500')}>HT une fois</span></p>}
                       {k.bM > 0 && <p className="mt-1"><span className={'mr-2 text-xs line-through ' + (fort ? 'text-white/60' : 'text-gray-400')}>{eur(k.bM)}</span><span className="font-display text-lg font-semibold">+ {eur(k.htM)}</span><span className={'ml-1 text-xs ' + (fort ? 'text-white/70' : 'text-gray-500')}>HT / mois</span></p>}
-                      <p className={'mt-1 text-xs ' + (fort ? 'text-white/70' : 'text-gray-500')}>soit {eur(k.ttcP)} TTC{k.ttcM > 0 ? ` + ${eur(k.ttcM)} TTC / mois` : ''}</p>
+                      <p className={'mt-1 text-xs ' + (fort ? 'text-white/70' : 'text-gray-500')}>soit {[k.ttcP > 0 && `${eur(k.ttcP)} TTC une seule fois`, k.ttcM > 0 && `${k.ttcP > 0 ? 'puis ' : ''}${eur(k.ttcM)} TTC par mois`].filter(Boolean).join(', ')}</p>
                       {k.eco > 0.5 && <p className="mt-3 rounded-xl bg-emerald-50 px-3 py-1.5 text-xs font-semibold text-emerald-800">− {num(k.remise)} % · vous économisez {eur(k.eco)} TTC{c.mois && k.bM > 0 ? ` sur ${c.mois} mois` : ''}</p>}
                       <p className="mt-3 flex items-center gap-2 text-sm font-medium"><span className="inline-block h-4 w-4 rounded border-2 border-current" />Je choisis cette formule</p>
                     </div>
