@@ -408,8 +408,9 @@ function combos(s, c) {
     // prix après remise globale, puis remise de la formule
     const bP = somme(unefois) * kP, bM = somme(mensuel) * kM;
     const htP = bP * (1 - r), htM = bM * (1 - r);
-    const prixMois = (p) => c.line(p) * kM * (1 - r); // HT / mois de la ligne dans la formule
+    const prixMois = (p) => c.line(p); // prix HT du CRM, les remises sont affichées à part
     return { ...k, blocs, bP, bM, htP, htM, ttcP: htP * t, ttcM: htM * t, unefois, mensuel, mensTous, inclus, prixMois,
+      brutP: somme(unefois), brutM: somme(mensuel),
       eco: ((bP - htP) + (bM - htM) * c.moisCalc) * t, totalTTC: (htP + htM * c.moisCalc) * t };
   }).filter(Boolean);
 }
@@ -619,7 +620,7 @@ function BlocCard({ o, r, c, large, cocher, exclus, onToggle, prixLigne, pris, o
                 <p className="flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-wider text-gray-900"><span className="h-2 w-2 rounded-full" style={{ background: coul }} />Création</p>
                 <p className="text-[11px] text-gray-500">Payée une seule fois</p>
               </div>
-              <p className="tabular text-right font-display text-lg font-bold leading-none">{eur(r.htP)} <span className="font-sans text-[11px] font-semibold text-gray-500">HT</span><span className="block font-sans text-[10px] font-medium text-gray-400">{eur(r.ttcP)} TTC</span></p>
+              <p className="tabular text-right font-display text-lg font-bold leading-none">{eur(r.bP)} <span className="font-sans text-[11px] font-semibold text-gray-500">HT</span>{r.bP - r.htP > 0.005 && <span className="block font-sans text-[10.5px] font-semibold text-emerald-700">remise − {eur(r.bP - r.htP)} → {eur(r.htP)} HT</span>}<span className="block font-sans text-[10px] font-medium text-gray-400">{eur(r.ttcP)} TTC</span></p>
             </div>
             <ul className="mt-2 divide-y divide-gray-100 overflow-hidden rounded-2xl border border-gray-200">{creations.map(ligne)}</ul>
           </div>
@@ -631,7 +632,7 @@ function BlocCard({ o, r, c, large, cocher, exclus, onToggle, prixLigne, pris, o
                 <p className="flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-wider text-sky-900"><span className="text-sm leading-none">↻</span>Abonnement · au choix</p>
                 <p className="text-[11px] text-sky-900/70">Facultatif, sans obligation</p>
               </div>
-              <p className="tabular text-right font-display text-lg font-bold leading-none text-sky-900">{eur(r.htM)} <span className="font-sans text-[11px] font-semibold text-sky-900/70">HT / mois</span><span className="block font-sans text-[10px] font-medium text-sky-900/60">{eur(r.ttcM)} TTC</span></p>
+              <p className="tabular text-right font-display text-lg font-bold leading-none text-sky-900">{eur(r.bM)} <span className="font-sans text-[11px] font-semibold text-sky-900/70">HT / mois</span>{r.bM - r.htM > 0.005 && <span className="block font-sans text-[10.5px] font-semibold text-emerald-700">remise − {eur(r.bM - r.htM)} → {eur(r.htM)} HT</span>}<span className="block font-sans text-[10px] font-medium text-sky-900/60">{eur(r.ttcM)} TTC</span></p>
             </div>
             <ul className="mt-2 divide-y divide-sky-100 overflow-hidden rounded-xl bg-white">{services.map(ligne)}</ul>
           </div>
@@ -688,7 +689,7 @@ function Proposal({ s, c, cTous, numero, onClose, toast, onExclu, onChoix, onDev
   const prixBloc = (o) => c.offres.find(x => x.id === o.id) || { ttcP: 0, ttcM: 0 };
   const sommeL = (arr) => arr.reduce((a, p) => a + c.line(p), 0);
   const kP = sommeL(c.ponct) ? c.htP / sommeL(c.ponct) : 1, kM = sommeL(c.mens) ? c.htM / sommeL(c.mens) : 1;
-  const prixLigne = (p) => c.line(p) * (p.type === 'mensuel' ? kM : kP); // HT, remise globale comprise
+  const prixLigne = (p) => c.line(p); // prix HT du CRM (prix × quantité), la remise est affichée à part
   const carte = { exclus: formule ? {} : (s.exclus || {}), onToggle: formule ? null : onExclu, prixLigne, c };
   const ch = s.choisi || {};
   const choixPack = (id) => onChoix({ formule: null, packs: (ch.packs || []).includes(id) ? ch.packs.filter(x => x !== id) : [...(ch.packs || []), id] });
@@ -817,7 +818,7 @@ function Proposal({ s, c, cTous, numero, onClose, toast, onExclu, onChoix, onDev
                         <div>
                           <p className={'text-xs font-semibold uppercase tracking-wide ' + (fort ? 'text-white/70' : 'text-gray-500')}>À la commande, une seule fois</p>
                           <p className="font-display text-[32px] font-semibold leading-none">{eur(k.htP)}<span className={'ml-1 font-sans text-sm font-medium ' + (fort ? 'text-white/70' : 'text-gray-500')}>HT</span></p>
-                          <p className={'text-xs ' + (fort ? 'text-white/60' : 'text-gray-400')}>soit {eur(k.ttcP)} TTC</p>
+                          <p className={'text-xs ' + (fort ? 'text-white/60' : 'text-gray-400')}>{k.brutP - k.htP > 0.005 && <span className="mr-1 line-through">{eur(k.brutP)} HT</span>}soit {eur(k.ttcP)} TTC</p>
                           <p className={'mt-1.5 text-[13px] leading-snug ' + (fort ? 'text-white/85' : 'text-gray-600')}>pour : {k.unefois.map(p => p.court || p.nom).join(' · ')}</p>
                         </div>
                       )}
@@ -825,7 +826,7 @@ function Proposal({ s, c, cTous, numero, onClose, toast, onExclu, onChoix, onDev
                         <div className={k.ttcP > 0 ? 'mt-4 border-t pt-3 ' + (fort ? 'border-white/20' : 'border-gray-100') : ''}>
                           <p className={'text-xs font-semibold uppercase tracking-wide ' + (fort ? 'text-white/70' : 'text-gray-500')}>{k.ttcP > 0 ? 'Puis chaque mois' : 'Chaque mois'}{c.mois ? ` (${c.mois} mois)` : ''} · services choisis</p>
                           <p className="font-display text-2xl font-semibold leading-none">{eur(k.htM)}<span className={'ml-1 font-sans text-sm font-medium ' + (fort ? 'text-white/70' : 'text-gray-500')}>HT / mois</span></p>
-                          <p className={'text-xs ' + (fort ? 'text-white/60' : 'text-gray-400')}>soit {eur(k.ttcM)} TTC / mois</p>
+                          <p className={'text-xs ' + (fort ? 'text-white/60' : 'text-gray-400')}>{k.brutM - k.htM > 0.005 && <span className="mr-1 line-through">{eur(k.brutM)} HT</span>}soit {eur(k.ttcM)} TTC / mois</p>
                           <p className={'mt-1 text-xs ' + (fort ? 'text-white/70' : 'text-gray-500')}>Uniquement les services cochés dans les packs :</p>
                           <ul className={'mt-2 divide-y overflow-hidden rounded-xl ' + (fort ? 'divide-white/10 bg-white/5' : 'divide-gray-100 bg-gray-50')}>
                             {k.mensTous.map(p => <LigneMois key={p.id} p={p} on fort={fort} prix={k.prixMois(p)} lecture />)}
