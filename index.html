@@ -376,7 +376,8 @@ function combos(s, c) {
     if (blocs.length < 2 || vus.has(cle)) return null;
     vus.add(cle);
     const r = Math.min(100, Math.max(0, num(k.remise))) / 100;
-    const bP = blocs.reduce((a, o) => a + o.bP, 0), bM = blocs.reduce((a, o) => a + o.bM, 0);
+    // prix des packs après la remise globale, puis remise de la formule
+    const bP = blocs.reduce((a, o) => a + o.htP, 0), bM = blocs.reduce((a, o) => a + o.htM, 0);
     const htP = bP * (1 - r), htM = bM * (1 - r);
     return { ...k, blocs, bP, bM, htP, htM, ttcP: htP * t, ttcM: htM * t,
       eco: ((bP - htP) + (bM - htM) * c.moisCalc) * t, totalTTC: (htP + htM * c.moisCalc) * t };
@@ -512,17 +513,17 @@ function buildText(s, c, numero) {
   L.push(`Bonjour${cl.responsable ? ' ' + cl.responsable.split(' ')[0] : ''},`, '');
   L.push(`Voici notre proposition pour ${cl.entreprise || 'votre commerce'} (devis ${numero}).`, '');
   const kombi = formule ? [] : combos(s, c);
-  const prixHT = (a, m) => [a > 0 && eur(a) + ' HT', m > 0 && eur(m) + ' HT / mois'].filter(Boolean).join(' + ');
+  const prixTTC = (a, m) => [a > 0 && eur(a) + ' TTC', m > 0 && (a > 0 ? 'puis ' : '') + eur(m) + ' TTC / mois'].filter(Boolean).join(', ');
   if (kombi.length) L.push('NOS PACKS (chacun peut être pris seul) :');
   else L.push(`${formule ? c.pack.nom.toUpperCase() : 'VOTRE SÉLECTION SUR MESURE'} : ${prixCourt(c)}`);
   if (formule && c.pack.promesse) L.push(c.pack.promesse);
   c.offres.forEach(o => {
-    L.push('', kombi.length ? `${o.nom} : ${prixHT(o.bP, o.bM)}` : o.nom);
+    L.push('', kombi.length ? `${o.nom} : ${prixTTC(o.ttcP, o.ttcM)}` : o.nom);
     o.items.forEach(p => L.push(`   ✓ ${p.nom}${qteLabel(p) ? ' (' + qteLabel(p) + ')' : ''}${p.type === 'mensuel' ? ' · chaque mois' : ''}`));
   });
   if (kombi.length) {
     L.push('', 'NOS FORMULES (regroupez et économisez) :');
-    kombi.forEach(k => L.push(`★ ${k.nom} (${k.blocs.map(o => o.nom.replace(/^(Pack|Option)\s+/, '')).join(' + ')}) : ${prixHT(k.htP, k.htM)}, soit −${num(k.remise)} %${k.recommande ? ' · recommandé' : ''}`));
+    kombi.forEach(k => L.push(`★ ${k.nom} (${k.blocs.map(o => o.nom.replace(/^(Pack|Option)\s+/, '')).join(' + ')}) : ${prixTTC(k.ttcP, k.ttcM)} (−${num(k.remise)} %)${k.recommande ? ' · recommandé' : ''}`));
   }
   L.push('');
   if (!kombi.length && c.economie > 0.5) L.push(`Remise incluse : ${eur(c.economie)} TTC d'économie${c.mois ? ` sur ${c.mois} mois` : ''}${formule ? ' par rapport aux mêmes prestations à la carte' : ''}.`);
@@ -569,8 +570,8 @@ function BlocCard({ o, c, large, cocher }) {
           <p className="mt-0.5 text-[13px] leading-snug text-white/85">{o.tag}</p>
         </div>
         <div className={'tabular mt-3 ' + (large ? 'sm:mt-0 sm:shrink-0 sm:text-right' : '')}>
-          {o.bP > 0 && <p className="font-display text-2xl font-semibold leading-none">{eur(o.bP)}<span className="ml-1 font-sans text-[11px] font-medium text-white/75">HT</span></p>}
-          {o.bM > 0 && <p className={'font-display font-semibold leading-none ' + (o.bP > 0 ? 'mt-1.5 text-base' : 'text-2xl')}>{o.bP > 0 ? '+ ' : ''}{eur(o.bM)}<span className="ml-1 font-sans text-[11px] font-medium text-white/75">HT / mois</span></p>}
+          {o.bP > 0 && <p className="font-display text-2xl font-semibold leading-none">{eur(o.ttcP)}<span className="ml-1 font-sans text-[11px] font-medium text-white/75">TTC</span></p>}
+          {o.bM > 0 && <p className={'font-display font-semibold leading-none ' + (o.bP > 0 ? 'mt-1.5 text-base' : 'text-2xl')}>{o.bP > 0 ? 'puis ' : ''}{eur(o.ttcM)}<span className="ml-1 font-sans text-[11px] font-medium text-white/75">{o.bP > 0 ? '/ mois' : 'TTC / mois'}</span></p>}
         </div>
       </div>
       <ul className={'gap-x-6 px-5 py-4 ' + (large ? 'grid gap-y-2 sm:grid-cols-2' : 'space-y-2')}>
@@ -581,7 +582,7 @@ function BlocCard({ o, c, large, cocher }) {
               <p className="font-medium leading-snug">{p.nom}{qteLabel(p) && <span className="font-normal text-gray-500"> · {qteLabel(p)}</span>}</p>
               <p className="desc line-clamp-2 text-xs leading-snug text-gray-500">{p.description}</p>
             </div>
-            <span className="tabular shrink-0 text-right text-xs text-gray-600">{eur(c.line(p))}{p.type === 'mensuel' && <span className="block">/ mois</span>}</span>
+            {p.type === 'mensuel' && <span className="h-fit shrink-0 rounded-full bg-sky-50 px-2 py-0.5 text-[10px] font-semibold text-sky-800">chaque mois</span>}
           </li>
         ))}
       </ul>
@@ -681,16 +682,16 @@ function Proposal({ s, c, numero, onClose, toast }) {
         <section className="mt-6">
           <h3 className="font-display text-xl font-semibold">{avecCombos ? 'Nos packs' : 'Ce qui est inclus'}</h3>
           <div className={'mt-3 grid items-start gap-4 ' + cols(principaux.length)}>
-            {principaux.map(o => <BlocCard key={o.id} o={o} c={c} cocher={avecCombos} />)}
+            {principaux.map(o => <BlocCard key={o.id} o={o} c={c} tva={s.tva} cocher={avecCombos} />)}
           </div>
-          {option && <div className="mt-4"><BlocCard o={option} c={c} large cocher={avecCombos} /></div>}
+          {option && <div className="mt-4"><BlocCard o={option} c={c} tva={s.tva} large cocher={avecCombos} /></div>}
         </section>
 
         {/* Formules : regrouper les packs à prix réduit */}
         {avecCombos && (
           <section className="avoid-break mt-8">
             <h3 className="font-display text-xl font-semibold">Nos formules : regroupez et économisez</h3>
-            <p className="text-sm text-gray-500">Les mêmes prestations que les packs ci-dessus, à prix réduit. Prix HT, TTC indiqué en dessous.</p>
+            <p className="text-sm text-gray-500">Les mêmes prestations que les packs ci-dessus, regroupées à prix réduit. Prix TTC, remises comprises.</p>
             <div className={'mt-5 grid items-stretch gap-4 ' + cols(kombi.length)}>
               {kombi.map(k => {
                 const fort = k.recommande;
@@ -698,16 +699,15 @@ function Proposal({ s, c, numero, onClose, toast }) {
                   <div key={k.id} className={'relative flex flex-col rounded-3xl p-5 ' + (fort ? 'bg-accent text-white shadow-lg' : 'border-2 border-gray-200 bg-white')}>
                     {fort && <span className="absolute -top-3 left-5 rounded-full bg-amber-400 px-3 py-1 text-[11px] font-bold uppercase tracking-wide text-ink">Recommandé</span>}
                     <p className={'text-[11px] font-bold uppercase tracking-wider ' + (fort ? 'text-white/70' : 'text-gray-500')}>{k.sous}</p>
-                    <p className="font-display text-2xl font-semibold leading-tight">{k.nom}</p>
+                    <p className="flex flex-wrap items-center gap-2 font-display text-2xl font-semibold leading-tight">{k.nom}{num(k.remise) > 0 && <span className="rounded-full bg-emerald-100 px-2 py-0.5 font-sans text-xs font-bold text-emerald-800">− {num(k.remise)} %</span>}</p>
                     <div className="mt-2 flex flex-wrap gap-1.5">
                       {k.blocs.map(o => <span key={o.id} className="rounded-full px-2.5 py-0.5 text-[11px] font-semibold text-white ring-1 ring-white/30" style={{ background: COULEURS[o.id] }}>{o.nom.replace(/^(Pack|Option)\s+/, '').split(' & ')[0]}</span>)}
                     </div>
-                    <div className="tabular mt-auto pt-4">
-                      {k.bP > 0 && <p><span className={'mr-2 text-sm line-through ' + (fort ? 'text-white/60' : 'text-gray-400')}>{eur(k.bP)}</span><span className="font-display text-[28px] font-semibold leading-none">{eur(k.htP)}</span><span className={'ml-1 text-xs ' + (fort ? 'text-white/70' : 'text-gray-500')}>HT une fois</span></p>}
-                      {k.bM > 0 && <p className="mt-1"><span className={'mr-2 text-xs line-through ' + (fort ? 'text-white/60' : 'text-gray-400')}>{eur(k.bM)}</span><span className="font-display text-lg font-semibold">+ {eur(k.htM)}</span><span className={'ml-1 text-xs ' + (fort ? 'text-white/70' : 'text-gray-500')}>HT / mois</span></p>}
-                      <p className={'mt-1 text-xs ' + (fort ? 'text-white/70' : 'text-gray-500')}>soit {[k.ttcP > 0 && `${eur(k.ttcP)} TTC une seule fois`, k.ttcM > 0 && `${k.ttcP > 0 ? 'puis ' : ''}${eur(k.ttcM)} TTC par mois`].filter(Boolean).join(', ')}</p>
-                      {k.eco > 0.5 && <p className="mt-3 rounded-xl bg-emerald-50 px-3 py-1.5 text-xs font-semibold text-emerald-800">− {num(k.remise)} % · vous économisez {eur(k.eco)} TTC{c.mois && k.bM > 0 ? ` sur ${c.mois} mois` : ''}</p>}
-                      <p className="mt-3 flex items-center gap-2 text-sm font-medium"><span className="inline-block h-4 w-4 rounded border-2 border-current" />Je choisis cette formule</p>
+                    <div className="tabular mt-auto pt-5">
+                      <p className={'text-xs font-semibold uppercase tracking-wide ' + (fort ? 'text-white/70' : 'text-gray-500')}>{k.ttcP > 0 ? 'Vous payez' : 'Par mois'}</p>
+                      <p className="font-display text-[34px] font-semibold leading-none">{eur(k.ttcP > 0 ? k.ttcP : k.ttcM)}<span className={'ml-1 font-sans text-sm font-medium ' + (fort ? 'text-white/70' : 'text-gray-500')}>TTC</span></p>
+                      {k.ttcP > 0 && k.ttcM > 0 && <p className="mt-1.5 text-[15px] font-semibold">puis {eur(k.ttcM)} <span className={'font-normal ' + (fort ? 'text-white/70' : 'text-gray-500')}>/ mois</span></p>}
+                      <p className="mt-4 flex items-center gap-2 text-sm font-medium"><span className="inline-block h-4 w-4 rounded border-2 border-current" />Je choisis cette formule</p>
                     </div>
                   </div>
                 );
