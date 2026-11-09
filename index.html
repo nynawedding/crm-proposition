@@ -33,6 +33,10 @@
     #app-main { display: none !important; }
     #proposal { box-shadow: none !important; border: 0 !important; margin: 0 !important; max-width: none !important; padding: 0 !important; }
     .avoid-break { break-inside: avoid; }
+    #proposal .desc { display: none; }
+    #proposal { font-size: 12.5px; }
+    #proposal section { margin-top: 14px !important; }
+    #proposal section + section { padding-top: 12px !important; }
   }
 </style>
 <script src="https://unpkg.com/react@18.3.1/umd/react.production.min.js" crossorigin></script>
@@ -48,24 +52,26 @@ const { useState, useEffect, useMemo, useRef } = React;
 /* ============================================================
    Données par défaut (tarifs indicatifs : à ajuster dans l'app)
    ============================================================ */
-// Trois offres bien séparées dans la proposition : la demande du client, puis deux options.
+// Les catégories de la vente à la carte : trois blocs + une option complémentaire.
 const OFFRES = [
-  { id: 'base', v: 2, nom: 'Création de contenu visuel', tag: 'Ce que vous nous avez demandé',
+  { id: 'base', v: 3, nom: 'Création visuelle', tag: 'Photos et vidéos de votre boutique',
     explication: "Nous venons filmer et photographier dans votre boutique, puis nous montons les vidéos et retouchons les photos, prêtes pour vos écrans et vos réseaux." },
-  { id: 'web', v: 2, nom: 'Création du site internet', tag: 'Votre vitrine en ligne',
-    explication: "Votre propre site, lisible sur téléphone et ordinateur : vos produits, vos horaires, votre adresse et votre numéro." },
-  { id: 'seo', v: 2, nom: 'Référencement Google (SEO)', tag: 'Être trouvé sur Google',
-    explication: "Le travail pour que votre commerce apparaisse en haut quand quelqu'un cherche sur Google ou Google Maps près de chez vous." },
-  { id: 'social', v: 2, nom: 'Gestion des réseaux sociaux', tag: 'Instagram et Facebook gérés pour vous',
-    explication: "Nous publions pour vous chaque semaine sur Instagram et Facebook, avec vos photos et vidéos, et nous répondons aux commentaires." },
+  { id: 'web', v: 3, nom: 'Visibilité web', tag: 'Votre site et Google',
+    explication: "Votre propre site, lisible sur téléphone et ordinateur, et le travail pour apparaître en haut sur Google et Google Maps près de chez vous." },
+  { id: 'social', v: 3, nom: 'Communication & acquisition', tag: 'Réseaux sociaux et campagnes',
+    explication: "Nous publions pour vous sur Instagram et Facebook et nous préparons vos campagnes pour faire venir de nouveaux clients." },
+  { id: 'fidel', v: 3, nom: 'Fidélisation & image de marque', tag: 'Option complémentaire',
+    explication: "Faire revenir vos clients : carte de fidélité, SMS aux clients qui l'acceptent, avis Google." },
 ];
 const OFFRE_IDS = OFFRES.map(o => o.id);
 const OFFRE_PAR_DEFAUT = {
   tournage: 'base', montage: 'base', retouche: 'base', ecrans: 'base',
-  site: 'web', miseenligne: 'web', hebergement: 'web', maintenance: 'web', majsite: 'web',
-  seo: 'seo', suiviseo: 'seo',
-  social: 'social', contenus: 'social', tiktok: 'social', reporting: 'social',
+  site: 'web', miseenligne: 'web', hebergement: 'web', maintenance: 'web', majsite: 'web', seo: 'web', suiviseo: 'web', blog: 'web',
+  social: 'social', contenus: 'social', reels: 'social', tiktok: 'social', planmkt: 'social', saison: 'social', reporting: 'social',
+  formulaire: 'fidel', fidelite: 'fidel', sms: 'fidel', qravis: 'fidel',
 };
+// ancien bloc « Référencement Google » : rattaché à Visibilité web
+const remapOffre = (o) => (o === 'seo' ? 'web' : o);
 
 const CATALOGUE = [
   { id: 'site', type: 'ponctuel', nom: 'Création de site internet', description: "Site vitrine responsive (5 à 8 pages), design sur mesure, formulaire de contact, optimisé mobile.", prix: 1490, qte: 1, unite: 'site' },
@@ -82,8 +88,39 @@ const CATALOGUE = [
   { id: 'hebergement', type: 'mensuel', nom: 'Hébergement et nom de domaine', description: "Hébergement rapide et sécurisé, nom de domaine et certificat SSL inclus.", prix: 19, qte: 1, unite: 'mois' },
   { id: 'majsite', type: 'mensuel', nom: 'Mises à jour du site', description: "Modifications de contenu : horaires, produits, actualités, photos (jusqu'à 1 h / mois).", prix: 39, qte: 1, unite: 'mois' },
   { id: 'suiviseo', v: 2, type: 'mensuel', nom: 'Suivi Google mensuel', description: "Publications sur votre fiche Google, réponses aux avis, suivi de votre position sur Google et ajustements chaque mois.", prix: 99, qte: 1, unite: 'mois' },
-  { id: 'reporting', type: 'mensuel', nom: 'Reporting mensuel', description: "Tableau de bord clair : visites, appels, abonnés, avis, et recommandations du mois.", prix: 49, qte: 1, unite: 'mois' },
+  { id: 'reporting', type: 'mensuel', nom: 'Suivi et reporting mensuel', description: "Tableau de bord clair : visites, appels, abonnés, avis, et recommandations du mois.", prix: 49, qte: 1, unite: 'mois' },
+  { id: 'reels', type: 'mensuel', nom: 'Vidéos courtes pour les réseaux sociaux', description: "2 vidéos courtes par mois (Reels, Stories), tournées et montées pour Instagram et Facebook.", prix: 190, qte: 1, unite: 'mois' },
+  { id: 'planmkt', type: 'ponctuel', nom: 'Plan marketing', description: "Vos clients, vos concurrents, vos objectifs, et le calendrier des actions sur 12 mois.", prix: 390, qte: 1, unite: 'forfait' },
+  { id: 'blog', type: 'mensuel', nom: 'Articles de blog SEO géolocalisés', description: "2 articles par mois sur votre quartier et vos produits, écrits pour être trouvés sur Google.", prix: 160, qte: 1, unite: 'mois' },
+  { id: 'saison', type: 'mensuel', nom: 'Campagnes de communication saisonnières', description: "Une campagne par temps fort (fêtes, galette, rentrée, été) : visuels, publications, affichage en boutique. Lissé au mois.", prix: 90, qte: 1, unite: 'mois' },
+  { id: 'formulaire', type: 'ponctuel', nom: 'Formulaires de collecte de contacts', description: "Formulaire sur le site et en boutique (QR code) pour recueillir emails et numéros, avec consentement (RGPD).", prix: 190, qte: 1, unite: 'forfait' },
+  { id: 'fidelite', type: 'ponctuel', nom: 'Programme de fidélité avec QR code', description: "Carte de fidélité digitale : le client scanne un QR code en caisse et cumule ses avantages.", prix: 290, qte: 1, unite: 'forfait' },
+  { id: 'sms', type: 'mensuel', nom: 'Campagnes SMS avec consentement', description: "Jusqu'à 2 campagnes par mois, envoyées uniquement aux clients qui ont donné leur accord. Coût d'envoi des SMS selon le volume.", prix: 59, qte: 1, unite: 'mois' },
+  { id: 'qravis', type: 'ponctuel', nom: 'QR code pour les avis Google', description: "Présentoir de comptoir avec un QR code qui ouvre directement la page d'avis Google.", prix: 49, qte: 1, unite: 'forfait' },
 ].map(p => ({ ...p, selected: false, offre: OFFRE_PAR_DEFAUT[p.id] || 'base' }));
+
+/* ============================ Formules ============================
+   Un pack = une liste d'identifiants du catalogue (jamais de doublon : c'est un objet {id: réglages}).
+   Réglages possibles par ligne : prix, qte, type (sinon : valeurs du catalogue).
+   La remise affichée = prix à la carte − prix final : elle est toujours réelle. */
+const IDS_SIGNATURE = ['tournage', 'retouche', 'montage', 'ecrans', 'site', 'miseenligne'];
+const IDS_PREMIUM = [...IDS_SIGNATURE, 'seo', 'suiviseo', 'hebergement', 'maintenance', 'social', 'contenus', 'reels'];
+const IDS_SERENITE = [...IDS_PREMIUM, 'planmkt', 'blog', 'saison', 'formulaire', 'fidelite', 'sms', 'qravis', 'reporting'];
+const toItems = (ids) => Object.fromEntries(ids.map(id => [id, {}]));
+const PACKS = [
+  { id: 'signature', v: 1, nom: 'Pack Signature', sous: "L'essentiel",
+    promesse: 'Valoriser votre commerce tout de suite : de belles images et un site à votre image.',
+    points: ['Shooting photo professionnel dans votre boutique', 'Photos retouchées, prêtes à publier', 'Vidéos montées pour les écrans de la boutique', 'Votre site internet, créé et mis en ligne'],
+    items: toItems(IDS_SIGNATURE), remises: { ponctuel: { mode: '%', valeur: 5 }, mensuel: { mode: '%', valeur: 0 } } },
+  { id: 'premium', v: 1, nom: 'Pack Premium', sous: 'Développer sa visibilité', recommande: true,
+    promesse: 'Être vu sur Google et sur les réseaux, chaque mois, sans vous en occuper.',
+    points: ['Tout le Pack Signature', 'Fiche Google et référencement local', 'Site hébergé et entretenu', 'Instagram et Facebook gérés pour vous', 'Publications et vidéos courtes chaque mois'],
+    items: toItems(IDS_PREMIUM), remises: { ponctuel: { mode: '%', valeur: 10 }, mensuel: { mode: '%', valeur: 10 } } },
+  { id: 'serenite', v: 1, nom: 'Pack Sérénité', sous: 'Communication complète',
+    promesse: 'Toute votre communication prise en charge, pour attirer et faire revenir vos clients.',
+    points: ['Tout le Pack Premium', 'Plan marketing et campagnes saisonnières', 'Articles de blog pour Google', 'Programme de fidélité avec QR code', 'SMS clients (avec accord) et avis Google', 'Suivi et reporting chaque mois'],
+    items: toItems(IDS_SERENITE), remises: { ponctuel: { mode: '%', valeur: 15 }, mensuel: { mode: '%', valeur: 15 } } },
+];
 
 const QUESTIONS = [
   { id: 'demande', q: 'Pourquoi nous avez-vous contacté ?', multi: true,
@@ -144,6 +181,9 @@ const DEFAULTS = {
   notes: {},
   prestations: CATALOGUE,
   offres: OFFRES,
+  mode: 'carte',   // 'carte' ou 'formule'
+  pack: '',        // formule choisie
+  packs: PACKS,
   remises: { ponctuel: { mode: '%', valeur: 0 }, mensuel: { mode: '%', valeur: 0 } },
   tva: 20,
   engagement: 12,
@@ -177,7 +217,8 @@ const load = () => {
       const base = p.v && st.v !== p.v ? { selected: !!st.selected, offre: st.offre } : st;
       // l'ancienne « fiche Google » (gbp) est fusionnée dans « Mise en place du référencement Google »
       if (p.id === 'seo' && stocke('gbp').selected) base.selected = true;
-      return { ...p, ...base, offre: valide(base.offre) ? base.offre : p.offre };
+      const offre = remapOffre(base.offre);
+      return { ...p, ...base, offre: valide(offre) ? offre : p.offre };
     });
     // seules les prestations créées à la main sont gardées en plus du catalogue
     const anciennes = { shooting: 'base', video: 'base' }; // prestations des versions précédentes, gardées avec vos prix
@@ -185,7 +226,12 @@ const load = () => {
       .filter(x => String(x.id).startsWith('perso-') || anciennes[x.id])
       .map(x => anciennes[x.id] ? { ...x, id: 'perso-' + x.id } : x)
       .filter((x, i, arr) => arr.findIndex(y => y.id === x.id) === i)
-      .map(x => ({ ...x, offre: valide(x.offre) ? x.offre : 'base' }));
+      .map(x => ({ ...x, offre: valide(remapOffre(x.offre)) ? remapOffre(x.offre) : 'base' }));
+    // formules : réglages enregistrés gardés s'ils datent de la version actuelle du pack
+    const packs = PACKS.map(d => {
+      const st = (s.packs || []).find(x => x.id === d.id && x.v === d.v);
+      return st ? { ...d, ...st, remises: { ...d.remises, ...st.remises } } : d;
+    });
     // noms d'offres personnalisés gardés seulement s'ils datent de la version actuelle des offres
     const offres = OFFRES.map(o => ({ ...o, ...((s.offres || []).find(x => x.id === o.id && x.v === o.v) || {}) }));
     // une seule fois : si la fiche enregistrée est vide, on y met le client préenregistré
@@ -194,7 +240,8 @@ const load = () => {
     const demo = !s.prefillApplied && !(s.visuels || {}).demoUrl ? { demoUrl: PREFILL.demoUrl } : {};
     return { ...DEFAULTS, ...s, prefillApplied: true, client, vendeur: { ...DEFAULTS.vendeur, ...s.vendeur },
       visuels: { ...DEFAULTS.visuels, ...s.visuels, ...demo }, remises: { ...DEFAULTS.remises, ...s.remises }, acompte: { ...DEFAULTS.acompte, ...s.acompte },
-      prestations: [...prestations, ...extras], offres };
+      prestations: [...prestations, ...extras], offres, packs,
+      mode: s.mode === 'formule' ? 'formule' : 'carte', pack: packs.some(x => x.id === s.pack) ? s.pack : '' };
   } catch { return DEFAULTS; }
 };
 
@@ -242,17 +289,37 @@ const qteTexte = (p) => {
 const qteLabel = (p) => { const t = qteTexte(p); return /^\d+$/.test(t) ? '× ' + t : t; };
 
 /* ============================ Calculs ============================ */
+// Lignes d'une formule : le catalogue, avec les réglages propres au pack. catPrix = prix à la carte.
+const packLines = (s, pack) => !pack ? [] : s.prestations
+  .filter(p => pack.items[p.id])
+  .map(p => {
+    const o = pack.items[p.id];
+    return { ...p, selected: true, catPrix: num(p.prix),
+      prix: o.prix !== undefined && o.prix !== '' ? o.prix : p.prix,
+      qte: o.qte !== undefined && o.qte !== '' ? o.qte : p.qte,
+      type: o.type || p.type };
+  });
+
 function compute(s) {
-  const sel = s.prestations.filter(p => p.selected);
+  const pack = (s.packs || []).find(x => x.id === s.pack);
+  if (s.mode === 'formule') return { ...calc(s, packLines(s, pack), pack ? pack.remises : DEFAULTS.remises), mode: 'formule', pack };
+  return { ...calc(s, s.prestations.filter(p => p.selected), s.remises), mode: 'carte', pack: null };
+}
+
+// Moteur unique, pour la carte comme pour les formules.
+function calc(s, sel, remises) {
   const line = (p) => num(p.prix) * Math.max(1, num(p.qte) || 1);
+  const lineCat = (p) => num(p.catPrix ?? p.prix) * Math.max(1, num(p.qte) || 1);
   const ponct = sel.filter(p => p.type === 'ponctuel');
   const mens = sel.filter(p => p.type === 'mensuel');
-  const brutP = ponct.reduce((a, p) => a + line(p), 0);
-  const brutM = mens.reduce((a, p) => a + line(p), 0);
+  const lignesP = ponct.reduce((a, p) => a + line(p), 0);
+  const lignesM = mens.reduce((a, p) => a + line(p), 0);
   const rem = (brut, r) => Math.min(brut, Math.max(0, r.mode === '%' ? brut * num(r.valeur) / 100 : num(r.valeur)));
-  const remP = rem(brutP, s.remises.ponctuel);
-  const remM = rem(brutM, s.remises.mensuel);
-  const htP = brutP - remP, htM = brutM - remM;
+  const htP = lignesP - rem(lignesP, remises.ponctuel), htM = lignesM - rem(lignesM, remises.mensuel);
+  // prix à la carte et remise réelle (prix à la carte − prix final, jamais négative)
+  const catP = ponct.reduce((a, p) => a + lineCat(p), 0), catM = mens.reduce((a, p) => a + lineCat(p), 0);
+  const brutP = Math.max(catP, htP), brutM = Math.max(catM, htM);
+  const remP = brutP - htP, remM = brutM - htM;
   const t = num(s.tva) / 100;
   const ttcP = htP * (1 + t), ttcM = htM * (1 + t);
   const mois = s.engagement || 0;
@@ -261,7 +328,7 @@ function compute(s) {
   const totalTTC = ttcP + ttcM * moisCalc;
   const acompte = s.acompte.actif ? ttcP * num(s.acompte.pct) / 100 : 0;
   // répartition par offre (remise répartie au prorata)
-  const kP = brutP ? htP / brutP : 1, kM = brutM ? htM / brutM : 1;
+  const kP = lignesP ? htP / lignesP : 1, kM = lignesM ? htM / lignesM : 1;
   const offres = (s.offres || OFFRES).map(o => {
     const items = sel.filter(p => (p.offre || 'base') === o.id);
     const bP = items.filter(p => p.type === 'ponctuel').reduce((a, p) => a + line(p), 0);
@@ -272,8 +339,20 @@ function compute(s) {
     return { ...o, items, bP, bM, htP: oHtP, htM: oHtM, ttcP: oTtcP, ttcM: oTtcM, acompte: oAcompte,
       totalTTC: oTtcP + oTtcM * moisCalc, totalHT: oHtP + oHtM * moisCalc };
   }).filter(o => o.items.length);
-  return { sel, ponct, mens, line, brutP, brutM, remP, remM, htP, htM, ttcP, ttcM, tvaP: ttcP - htP, tvaM: ttcM - htM,
-    mois, moisCalc, totalHT, totalTTC, acompte, offres };
+  const economie = (remP + remM * moisCalc) * (1 + t); // TTC, sur la durée d'engagement
+  return { sel, ponct, mens, line, lineCat, brutP, brutM, remP, remM, htP, htM, ttcP, ttcM, tvaP: ttcP - htP, tvaM: ttcM - htM,
+    mois, moisCalc, totalHT, totalTTC, acompte, offres, economie };
+}
+
+// Compare la sélection à la carte avec une formule (en gardant ou non les prestations hors pack).
+function comparer(s, pack, garder) {
+  const carteSel = s.prestations.filter(p => p.selected);
+  const carte = calc(s, carteSel, s.remises);
+  const lignes = packLines(s, pack);
+  const enPlus = lignes.filter(p => !carteSel.some(x => x.id === p.id));
+  const horsPack = carteSel.filter(p => !pack.items[p.id]);
+  const pk = calc(s, [...lignes, ...(garder ? horsPack.map(p => ({ ...p, catPrix: num(p.prix) })) : [])], pack.remises);
+  return { carte, pk, enPlus, horsPack };
 }
 
 /* ============================ UI de base ============================ */
@@ -383,32 +462,25 @@ function PrestationCard({ p, suggested, onChange, onRemove, offres }) {
 }
 
 /* ============================ Proposition ============================ */
-// Le client doit comprendre en 10 secondes : ce qu'il a demandé, combien, et ce qu'il peut ajouter.
-const prixOffre = (o, c) => {
-  const parts = [];
-  if (o.ttcP > 0) parts.push(`${eur(o.ttcP)} une fois`);
-  if (o.ttcM > 0) parts.push(`${eur(o.ttcM)} / mois${c.mois ? ` pendant ${c.mois} mois` : ''}`);
-  return parts.join(' + ');
-};
+// Une page A4 : la formule (ou la sélection), le prix à la commande, le prix par mois, la remise réelle, les conditions.
+const prixCourt = (c) => [c.ttcP > 0 && `${eur(c.ttcP)} TTC à la commande`, c.ttcM > 0 && `${eur(c.ttcM)} TTC / mois${c.mois ? ` pendant ${c.mois} mois` : ''}`].filter(Boolean).join(' + ');
+const signe = (n) => (n > 0.005 ? '+ ' : n < -0.005 ? '− ' : '') + eur(Math.abs(n));
+const dureeTxt = (c) => (c.mois ? `pendant ${c.mois} mois` : 'sans engagement');
 
 function buildText(s, c, numero) {
-  const L = [];
-  const cl = s.client, t = 1 + num(s.tva) / 100;
-  L.push(`Bonjour${cl.responsable ? ' ' + cl.responsable.split(' ')[0] : ''},`);
-  L.push('');
-  L.push(`Voici notre proposition pour ${cl.entreprise || 'votre commerce'} (devis ${numero}). Prix TTC.`);
-  c.offres.forEach((o, i) => {
-    L.push('');
-    L.push(`${i === 0 && o.id === 'base' ? '★' : '+'} ${o.nom.toUpperCase()} : ${prixOffre(o, c)}`);
-    o.items.forEach(p => L.push(`   ✓ ${p.nom}${qteLabel(p) ? ' (' + qteLabel(p) + ')' : ''}`));
+  const L = [], cl = s.client;
+  const formule = c.mode === 'formule' && c.pack;
+  L.push(`Bonjour${cl.responsable ? ' ' + cl.responsable.split(' ')[0] : ''},`, '');
+  L.push(`Voici notre proposition pour ${cl.entreprise || 'votre commerce'} (devis ${numero}).`, '');
+  L.push(`${formule ? c.pack.nom.toUpperCase() : 'VOTRE SÉLECTION SUR MESURE'} : ${prixCourt(c)}`);
+  if (formule && c.pack.promesse) L.push(c.pack.promesse);
+  c.offres.forEach(o => {
+    L.push('', o.nom);
+    o.items.forEach(p => L.push(`   ✓ ${p.nom}${qteLabel(p) ? ' (' + qteLabel(p) + ')' : ''}${p.type === 'mensuel' ? ' · chaque mois' : ''}`));
   });
-  if (c.offres.length > 1) {
-    L.push('');
-    L.push(`Si vous prenez tout : ${eur(c.ttcP)} une fois + ${eur(c.ttcM)} / mois (total ${c.mois ? c.mois + ' mois' : '1er mois'} : ${eur(c.totalTTC)}).`);
-  }
-  const eco = (c.remP + c.remM * c.moisCalc) * t;
-  if (eco > 0) L.push(`Remise incluse : ${eur(eco)} d'économie.`);
   L.push('');
+  if (c.economie > 0.5) L.push(`Remise incluse : ${eur(c.economie)} TTC d'économie${c.mois ? ` sur ${c.mois} mois` : ''}${formule ? ' par rapport aux mêmes prestations à la carte' : ''}.`);
+  L.push(`Total ${c.mois ? 'sur ' + c.mois + ' mois' : 'du 1er mois'} : ${eur(c.totalTTC)} TTC.`);
   L.push(`Offre valable jusqu'au ${fmtDate(addDays(today(), num(s.validite)))}.`);
   if (s.visuels.demoUrl) L.push('Démonstration : ' + s.visuels.demoUrl);
   const v = s.vendeur;
@@ -416,62 +488,32 @@ function buildText(s, c, numero) {
   return L.join('\n');
 }
 
-function Check() {
-  return <svg className="mt-0.5 h-5 w-5 shrink-0 text-emerald-600" viewBox="0 0 20 20" fill="currentColor"><path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.7-9.3a1 1 0 00-1.4-1.4L9 10.6 7.7 9.3a1 1 0 00-1.4 1.4l2 2a1 1 0 001.4 0l4-4z" clipRule="evenodd"/></svg>;
+function Check({ className = '' }) {
+  return <svg className={'mt-0.5 h-5 w-5 shrink-0 text-emerald-600 ' + className} viewBox="0 0 20 20" fill="currentColor"><path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.7-9.3a1 1 0 00-1.4-1.4L9 10.6 7.7 9.3a1 1 0 00-1.4 1.4l2 2a1 1 0 001.4 0l4-4z" clipRule="evenodd"/></svg>;
 }
 
-function OffreCard({ o, i, c, principale }) {
+// Tableau « prix à la carte → remise → prix final », partagé par l'éditeur de pack et la proposition.
+function TableRemise({ r, tva, dense }) {
+  const cols = [r.brutP > 0 && ['Une fois', r.brutP, r.remP, r.htP, r.ttcP], r.brutM > 0 && ['Par mois', r.brutM, r.remM, r.htM, r.ttcM]].filter(Boolean);
+  if (!cols.length) return null;
+  const td = dense ? 'px-3 py-1.5' : 'px-3 py-2';
   return (
-    <div className={'avoid-break overflow-hidden rounded-3xl ' + (principale ? 'border-2 border-accent' : 'border border-gray-200')}>
-      <div className={'flex flex-wrap items-start justify-between gap-4 px-5 py-5 sm:px-6 ' + (principale ? 'bg-accent text-white' : 'bg-gray-50')}>
-        <div className="flex min-w-0 items-start gap-3">
-          <span className={'mt-1 grid h-6 w-6 shrink-0 place-items-center rounded-md border-2 ' + (principale ? 'border-white/80' : 'border-gray-400')} aria-hidden="true" />
-          <div className="min-w-0">
-            <p className={'text-xs font-bold uppercase tracking-wider ' + (principale ? 'text-white/75' : 'text-gray-500')}>
-              {principale ? o.tag : `Option ${i} · ${o.tag}`}
-            </p>
-            <p className="font-display text-2xl font-semibold leading-tight">{o.nom}</p>
-            {o.explication && <p className={'mt-1.5 max-w-md text-sm leading-snug ' + (principale ? 'text-white/85' : 'text-gray-600')}>{o.explication}</p>}
-          </div>
-        </div>
-        <div className="tabular sm:text-right">
-          {o.ttcP > 0 && <p className="font-display text-[30px] font-semibold leading-none">{eur(o.ttcP)}<span className={'ml-1 text-sm font-sans font-medium ' + (principale ? 'text-white/75' : 'text-gray-500')}>TTC</span></p>}
-          {o.ttcP > 0 && <p className={'text-sm ' + (principale ? 'text-white/75' : 'text-gray-500')}>une seule fois · {eur(o.htP)} HT</p>}
-          {o.ttcM > 0 && <p className={'font-display font-semibold leading-none ' + (o.ttcP > 0 ? 'mt-2 text-xl' : 'text-[30px]')}>{o.ttcP > 0 ? '+ ' : ''}{eur(o.ttcM)}<span className={'ml-1 text-sm font-sans font-medium ' + (principale ? 'text-white/75' : 'text-gray-500')}>TTC / mois</span></p>}
-          {o.ttcM > 0 && <p className={'text-sm ' + (principale ? 'text-white/75' : 'text-gray-500')}>{c.mois ? `pendant ${c.mois} mois` : 'sans engagement'} · {eur(o.htM)} HT</p>}
-        </div>
-      </div>
-      <ul className="divide-y divide-gray-100 px-5 sm:px-6">
-        {o.items.map(p => (
-          <li key={p.id} className="flex gap-3 py-3">
-            <Check />
-            <div className="min-w-0 flex-1">
-              <p className="font-semibold leading-snug">{p.nom}{qteLabel(p) && <span className="font-normal text-gray-500"> · {qteLabel(p)}</span>}</p>
-              <p className="text-sm leading-snug text-gray-600">{p.description}</p>
-            </div>
-            {p.type === 'mensuel' && <span className="h-fit shrink-0 rounded-full bg-sky-50 px-2.5 py-1 text-[11px] font-semibold text-sky-800">chaque mois</span>}
-          </li>
-        ))}
-      </ul>
-    </div>
+    <table className="tabular w-full text-[13px]">
+      <thead><tr className="text-left text-[11px] uppercase tracking-wide text-gray-500"><th className={td + ' font-semibold'} />{cols.map(c => <th key={c[0]} className={td + ' text-right font-semibold'}>{c[0]}</th>)}</tr></thead>
+      <tbody className="divide-y divide-gray-100">
+        <tr><td className={td + ' text-gray-600'}>Prix à la carte HT</td>{cols.map(c => <td key={c[0]} className={td + ' text-right'}>{eur(c[1])}</td>)}</tr>
+        {cols.some(c => c[2] > 0.005) && <tr className="text-emerald-700"><td className={td}>Remise commerciale</td>{cols.map(c => <td key={c[0]} className={td + ' text-right'}>{c[2] > 0.005 ? '− ' + eur(c[2]) : '—'}</td>)}</tr>}
+        <tr className="font-semibold"><td className={td}>Prix final HT</td>{cols.map(c => <td key={c[0]} className={td + ' text-right'}>{eur(c[3])}</td>)}</tr>
+        <tr className="font-semibold"><td className={td}>Prix final TTC <span className="font-normal text-gray-500">(TVA {tva} %)</span></td>{cols.map(c => <td key={c[0]} className={td + ' text-right'}>{eur(c[4])}</td>)}</tr>
+      </tbody>
+    </table>
   );
 }
 
 function Proposal({ s, c, numero, onClose, toast }) {
   const cl = s.client, v = s.vendeur;
-  const t = 1 + num(s.tva) / 100;
-  const obj = s.reponses.objectif || [];
-  const demande = s.reponses.demande || [];
-  const economie = (c.remP + c.remM * c.moisCalc) * t;
   const validite = fmtDate(addDays(today(), num(s.validite)));
-  const base = c.offres.find(o => o.id === 'base');
-  const options = c.offres.filter(o => o !== base);
-  const DIRE = { 'Shooting photo': 'un shooting photo', 'Vidéos': 'des vidéos', 'Contenus pour mes écrans en boutique': 'des contenus pour vos écrans en boutique',
-    'Site internet': 'un site internet', 'Réseaux sociaux': 'de l\'aide sur vos réseaux sociaux' };
-  const liste = (xs) => xs.length > 1 ? xs.slice(0, -1).join(', ') + ' et ' + xs[xs.length - 1] : xs[0];
-  const intro = base
-    ? `Vous nous avez demandé ${demande.length ? liste(demande.map(d => DIRE[d] || d.toLowerCase())) : liste(base.items.map(p => p.nom.toLowerCase()))}. Voici le prix de votre demande${options.length ? `, puis ${options.length === 1 ? 'une option' : options.length + ' options'} pour aller plus loin, à ajouter seulement si vous le souhaitez` : ''}.`
-    : 'Voici les offres préparées pour vous. Cochez celles que vous choisissez.';
+  const formule = c.mode === 'formule' && c.pack;
   const text = buildText(s, c, numero);
   const subject = `Votre proposition ${cl.entreprise ? '– ' + cl.entreprise : ''} (${numero})`;
 
@@ -488,12 +530,11 @@ function Proposal({ s, c, numero, onClose, toast }) {
     toast('Votre messagerie est ouverte avec le message prérempli. Joignez le PDF puis envoyez.');
   };
 
-  const Line = ({ l, v, strong, minus }) => (
-    <div className={'flex justify-between gap-4 py-1 ' + (strong ? 'font-semibold text-ink' : 'text-gray-600')}>
-      <span>{l}</span><span className={'tabular ' + (minus ? 'text-emerald-700' : '')}>{v}</span>
-    </div>
-  );
-  const cell = (n) => n > 0 ? eur(n) : '—';
+  const tuiles = [
+    c.ttcP > 0 && ['À la commande', c.ttcP, `${eur(c.htP)} HT · une seule fois`],
+    c.ttcM > 0 && ['Chaque mois', c.ttcM, `${eur(c.htM)} HT · ${dureeTxt(c)}`],
+    c.ttcM > 0 && [c.mois ? `Total sur ${c.mois} mois` : 'Total du 1er mois', c.totalTTC, `${eur(c.totalHT)} HT, tout compris`],
+  ].filter(Boolean);
 
   return (
     <div id="proposal-overlay" className="fixed inset-0 z-50 overflow-y-auto bg-gray-900/40 backdrop-blur-sm sm:p-6">
@@ -507,171 +548,102 @@ function Proposal({ s, c, numero, onClose, toast }) {
         </div>
       </div>
 
-      <article id="proposal" className="mx-auto max-w-[860px] bg-white px-5 py-8 text-[15px] leading-relaxed shadow-xl sm:rounded-b-2xl sm:px-12 sm:py-10">
-        {/* En-tête */}
-        <header className="avoid-break flex items-start justify-between gap-6">
+      <article id="proposal" className="mx-auto max-w-[860px] bg-white px-5 py-8 text-[14px] leading-relaxed shadow-xl sm:rounded-b-2xl sm:px-10 sm:py-9">
+        {/* Client */}
+        <header className="avoid-break flex items-start justify-between gap-6 border-b border-gray-200 pb-5">
           <div className="min-w-0">
-            <p className="text-xs font-semibold uppercase tracking-[.18em] text-gray-500">Proposition · N° {numero} · valable jusqu'au {validite}</p>
-            <h1 className="mt-2 font-display text-[28px] font-semibold leading-tight sm:text-4xl">Votre projet pour {cl.entreprise || 'votre commerce'}</h1>
-            <p className="mt-2 text-gray-600">{[cl.responsable, cl.adresse].filter(Boolean).join(' · ')}</p>
+            <p className="text-[11px] font-semibold uppercase tracking-[.18em] text-gray-500">Proposition commerciale · N° {numero}</p>
+            <h1 className="mt-1.5 font-display text-[26px] font-semibold leading-tight sm:text-[32px]">{cl.entreprise || 'Votre commerce'}</h1>
+            <p className="mt-1 text-gray-600">{[cl.responsable, cl.adresse, cl.telephone].filter(Boolean).join(' · ')}</p>
           </div>
-          {s.visuels.logo && <img src={s.visuels.logo} alt="" className="h-16 w-24 shrink-0 rounded-lg object-cover sm:h-20 sm:w-32" />}
+          <div className="shrink-0 text-right">
+            {s.visuels.logo && <img src={s.visuels.logo} alt="" className="mb-2 ml-auto h-14 w-20 rounded-lg object-cover" />}
+            <p className="text-xs text-gray-500">{fmtDate(today())}<br />valable jusqu'au {validite}</p>
+          </div>
         </header>
 
-        {/* 1. Les offres, chacune avec son prix */}
-        <section className="mt-8">
-          <p className="max-w-2xl text-lg leading-snug text-gray-800">{intro}</p>
-          <p className="mt-1 text-sm text-gray-500">Tous les prix sont affichés TTC, la TVA ({s.tva} %) est comprise.</p>
-          <div className="mt-6 space-y-5">
-            {c.offres.map((o, i) => <OffreCard key={o.id} o={o} i={base ? i : i + 1} c={c} principale={o === base || (!base && i === 0)} />)}
-            {c.offres.length === 0 && <p className="text-gray-500">Aucune prestation sélectionnée.</p>}
+        {/* Formule et prix */}
+        <section className="avoid-break mt-6 overflow-hidden rounded-3xl border-2 border-accent">
+          <div className="bg-accent px-5 py-5 text-white sm:px-7">
+            <p className="text-xs font-bold uppercase tracking-wider text-white/70">{formule ? (c.pack.sous || 'Formule') : 'À la carte'}</p>
+            <h2 className="font-display text-[28px] font-semibold leading-tight">{formule ? c.pack.nom : 'Votre sélection sur mesure'}</h2>
+            <p className="mt-1 max-w-xl text-white/85">{formule ? c.pack.promesse : 'Les prestations choisies ensemble, et seulement celles-là.'}</p>
           </div>
-          {c.offres.length > 1 && (
-            <div className="avoid-break mt-5 flex flex-wrap items-center justify-between gap-3 rounded-2xl bg-gray-900 px-5 py-4 text-white sm:px-6">
-              <p className="font-semibold">Si vous prenez tout</p>
-              <p className="tabular text-right">
-                <span className="font-display text-xl font-semibold">{prixOffre({ ttcP: c.ttcP, ttcM: c.ttcM }, c)}</span>
-                <span className="block text-sm text-white/70">soit {eur(c.totalTTC)} TTC {c.mois ? `sur ${c.mois} mois` : 'le 1er mois'}</span>
-              </p>
+          <div className={'grid divide-y divide-gray-100 sm:divide-x sm:divide-y-0 ' + (tuiles.length === 3 ? 'sm:grid-cols-3' : tuiles.length === 2 ? 'sm:grid-cols-2' : '')}>
+            {tuiles.map(([l, val, sub]) => (
+              <div key={l} className="px-5 py-4 sm:px-6">
+                <p className="text-[11px] font-semibold uppercase tracking-wide text-gray-500">{l}</p>
+                <p className="tabular font-display text-[28px] font-semibold leading-tight">{eur(val)}<span className="ml-1 font-sans text-sm font-medium text-gray-500">TTC</span></p>
+                <p className="tabular text-xs text-gray-500">{sub}</p>
+              </div>
+            ))}
+          </div>
+          {c.economie > 0.5 && (
+            <div className="border-t border-gray-100 bg-emerald-50 px-5 py-3 text-sm sm:px-7">
+              <p className="font-semibold text-emerald-800">✓ Vous économisez {eur(c.economie)} TTC{c.mois && c.remM > 0.005 ? ` sur ${c.mois} mois` : ''}{formule ? ' par rapport aux mêmes prestations à la carte.' : ' grâce à la remise commerciale.'}</p>
             </div>
           )}
-          {economie > 0 && <p className="mt-3 text-sm font-semibold text-emerald-700">✓ Remise déjà déduite : {eur(economie)} TTC d'économie{c.mois ? ` sur ${c.mois} mois` : ''} si vous prenez tout.</p>}
         </section>
 
-        {/* 2. Quand vous payez */}
-        {c.offres.length > 0 && (
-          <section className="avoid-break mt-10">
-            <h2 className="font-display text-2xl font-semibold">Quand vous payez</h2>
-            <p className="mt-1 text-sm text-gray-500">Vous ne payez que les offres que vous cochez.</p>
-            <div className="mt-4 overflow-x-auto rounded-2xl border border-gray-200">
-              <table className="w-full text-[13px] sm:text-sm">
-                <thead className="bg-gray-50 text-left text-xs uppercase tracking-wide text-gray-500">
-                  <tr>
-                    <th className="px-3 py-3 font-semibold sm:px-4">Offre</th>
-                    {s.acompte.actif && c.ttcP > 0 && <th className="px-2 py-3 text-right font-semibold sm:px-3">Commande<span className="block font-normal normal-case">acompte {s.acompte.pct} %</span></th>}
-                    {c.ttcP > 0 && <th className="px-2 py-3 text-right font-semibold sm:px-3">Livraison</th>}
-                    {c.ttcM > 0 && <th className="px-3 py-3 text-right font-semibold sm:px-4">Par mois</th>}
-                  </tr>
-                </thead>
-                <tbody className="tabular divide-y divide-gray-100">
-                  {c.offres.map(o => (
-                    <tr key={o.id}>
-                      <td className="px-3 py-3 font-semibold leading-snug sm:px-4">{o.nom}</td>
-                      {s.acompte.actif && c.ttcP > 0 && <td className="whitespace-nowrap px-2 py-3 text-right sm:px-3">{cell(o.acompte)}</td>}
-                      {c.ttcP > 0 && <td className="whitespace-nowrap px-2 py-3 text-right sm:px-3">{cell(o.ttcP - o.acompte)}</td>}
-                      {c.ttcM > 0 && <td className="whitespace-nowrap px-3 py-3 text-right sm:px-4">{cell(o.ttcM)}</td>}
-                    </tr>
+        {/* Prestations incluses */}
+        <section className="mt-6">
+          <h3 className="font-display text-xl font-semibold">Ce qui est inclus</h3>
+          <div className="mt-3 grid gap-x-8 gap-y-4 sm:grid-cols-2">
+            {c.offres.map(o => (
+              <div key={o.id} className="avoid-break">
+                <p className="border-b border-gray-200 pb-1 text-[11px] font-bold uppercase tracking-wider text-gray-500">{o.nom}</p>
+                <ul className="mt-1.5 space-y-1.5">
+                  {o.items.map(p => (
+                    <li key={p.id} className="flex gap-2">
+                      <Check className="h-4 w-4" />
+                      <div className="min-w-0 flex-1">
+                        <p className="font-medium leading-snug">{p.nom}{qteLabel(p) && <span className="font-normal text-gray-500"> · {qteLabel(p)}</span>}</p>
+                        <p className="desc text-xs leading-snug text-gray-500">{p.description}</p>
+                      </div>
+                      <span className="tabular shrink-0 text-right text-xs text-gray-600">{eur(c.line(p))} HT{p.type === 'mensuel' && <span className="block">/ mois</span>}</span>
+                    </li>
                   ))}
-                </tbody>
-              </table>
-            </div>
-            <p className="mt-3 whitespace-pre-line text-sm text-gray-600">{s.paiement}</p>
-          </section>
-        )}
-
-        {/* 3. Pourquoi */}
-        {(s.presentation.trim() || obj.length > 0) && (
-          <section className="avoid-break mt-10">
-            <h2 className="font-display text-2xl font-semibold">Votre objectif</h2>
-            {s.presentation.trim() && <p className="mt-2 whitespace-pre-line text-gray-700">{s.presentation}</p>}
-            {obj.length > 0 && <div className="mt-3 flex flex-wrap gap-2">{obj.map(o => <span key={o} className="rounded-full bg-gray-100 px-3.5 py-1.5 text-sm font-medium">{o}</span>)}</div>}
-          </section>
-        )}
-
-        {(s.visuels.photos.length > 0 || s.visuels.demoUrl) && (
-          <section className="avoid-break mt-8">
-            {s.visuels.photos.length > 0 && (
-              <div className="grid grid-cols-3 gap-2">{s.visuels.photos.slice(0, 3).map((ph, i) => <img key={i} src={ph} alt="" className="aspect-[4/3] w-full rounded-xl object-cover" />)}</div>
-            )}
-            {s.visuels.demoUrl && (
-              <a href={s.visuels.demoUrl} className="mt-3 flex items-center justify-between gap-3 rounded-2xl border border-gray-200 px-5 py-4 hover:bg-gray-50">
-                <span className="min-w-0"><span className="block font-semibold">Voir la démonstration en ligne</span><span className="block truncate text-sm text-gray-500">{s.visuels.demoUrl}</span></span>
-                <span className="text-xl text-accent">→</span>
-              </a>
-            )}
-          </section>
-        )}
-
-        {/* 4. Détail du prix, bloc par bloc */}
-        <section className="mt-10 border-t border-gray-200 pt-8">
-          <h2 className="font-display text-2xl font-semibold">Détail du prix</h2>
-          <p className="mt-1 text-sm text-gray-500">Bloc par bloc : chaque prestation, sa quantité et son prix unitaire (HT), puis le total du bloc.</p>
-          <div className="mt-5 space-y-5">
-            {c.offres.map((o, i) => {
-              const remP = o.bP - o.htP, remM = o.bM - o.htM;
-              const unit = (p) => qteTexte(p) ? `${qteTexte(p)} × ${eur(num(p.prix))}` : '';
-              return (
-                <div key={o.id} className="avoid-break overflow-hidden rounded-2xl border border-gray-200">
-                  <p className="bg-gray-50 px-4 py-3 font-semibold sm:px-5">{o.id === 'base' ? '★ ' : (i ? i + '. ' : '')}{o.nom}</p>
-                  <table className="w-full text-[13px] sm:text-sm">
-                    <tbody className="tabular divide-y divide-gray-100">
-                      {o.items.map(p => (
-                        <tr key={p.id} className="align-top">
-                          <td className="px-4 py-2.5 sm:px-5">
-                            <span className="text-ink">{p.nom}</span>
-                            {unit(p) && <span className="block text-gray-500">{unit(p)}</span>}
-                          </td>
-                          <td className="whitespace-nowrap px-4 py-2.5 text-right sm:px-5">{eur(c.line(p))} HT{p.type === 'mensuel' && <span className="block text-gray-500">par mois</span>}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                  <div className={'grid gap-x-8 border-t border-gray-200 bg-gray-50/60 px-4 py-3 text-sm sm:px-5 ' + (o.bP > 0 && o.bM > 0 ? 'sm:grid-cols-2' : '')}>
-                    {o.bP > 0 && (
-                      <div>
-                        <p className="font-semibold">Une seule fois</p>
-                        {remP > 0.005 && <Line l="Avant remise" v={eur(o.bP) + ' HT'} />}
-                        {remP > 0.005 && <Line minus l={'Remise' + (s.remises.ponctuel.mode === '%' ? ` ${s.remises.ponctuel.valeur} %` : '')} v={'− ' + eur(remP) + ' HT'} />}
-                        <Line l="Total HT" v={eur(o.htP)} />
-                        <Line l={`TVA ${s.tva} %`} v={eur(o.ttcP - o.htP)} />
-                        <Line strong l="Total TTC" v={eur(o.ttcP)} />
-                      </div>
-                    )}
-                    {o.bM > 0 && (
-                      <div>
-                        <p className="font-semibold">Par mois</p>
-                        {remM > 0.005 && <Line l="Avant remise" v={eur(o.bM) + ' HT'} />}
-                        {remM > 0.005 && <Line minus l={'Remise' + (s.remises.mensuel.mode === '%' ? ` ${s.remises.mensuel.valeur} %` : '')} v={'− ' + eur(remM) + ' HT'} />}
-                        <Line l="Total HT / mois" v={eur(o.htM)} />
-                        <Line l={`TVA ${s.tva} %`} v={eur(o.ttcM - o.htM)} />
-                        <Line strong l="Total TTC / mois" v={eur(o.ttcM)} />
-                      </div>
-                    )}
-                  </div>
-                </div>
-              );
-            })}
+                </ul>
+              </div>
+            ))}
           </div>
-          {c.offres.length > 1 && (
-            <div className="avoid-break mt-5 grid gap-x-8 rounded-2xl bg-gray-900 px-4 py-4 text-sm text-white sm:grid-cols-2 sm:px-5">
-              <p className="font-semibold sm:col-span-2">Si vous prenez tous les blocs</p>
-              {c.ttcP > 0 && <div className="flex justify-between py-1"><span className="text-white/70">Une seule fois</span><span className="tabular">{eur(c.htP)} HT · <strong>{eur(c.ttcP)} TTC</strong></span></div>}
-              {c.ttcM > 0 && <div className="flex justify-between py-1"><span className="text-white/70">Par mois</span><span className="tabular">{eur(c.htM)} HT · <strong>{eur(c.ttcM)} TTC</strong></span></div>}
-            </div>
-          )}
         </section>
 
-        {/* 5. Inclus, conditions */}
-        <section className="avoid-break mt-8 grid gap-6 border-t border-gray-200 pt-8 text-sm sm:grid-cols-2">
-          {c.mens.length > 0 && s.inclus.trim() && (
-            <div>
-              <p className="font-semibold">Toujours inclus dans les abonnements</p>
-              <ul className="mt-2 space-y-1 text-gray-700">{s.inclus.split('\n').filter(Boolean).map(l => <li key={l} className="flex gap-2"><span className="text-emerald-600">✓</span>{l}</li>)}</ul>
-            </div>
-          )}
+        {/* Détail du prix et paiement */}
+        <section className="avoid-break mt-6 grid gap-6 border-t border-gray-200 pt-5 sm:grid-cols-2">
           <div>
-            <p className="font-semibold">Engagement et validité</p>
-            {c.mens.length > 0 && <p className="mt-2 text-gray-700">{c.mois ? `Abonnements : engagement de ${c.mois} mois à partir de la mise en route.` : 'Abonnements sans engagement : ils s\'arrêtent quand vous le souhaitez.'}</p>}
-            <p className="mt-2 text-gray-700">Cette offre est valable jusqu'au <strong>{validite}</strong>.</p>
+            <h3 className="font-semibold">Détail du prix</h3>
+            <div className="mt-2 rounded-2xl border border-gray-200"><TableRemise r={c} tva={s.tva} dense /></div>
+          </div>
+          <div>
+            <h3 className="font-semibold">Comment vous payez</h3>
+            <div className="tabular mt-2 space-y-1 text-[13px]">
+              {c.ttcP > 0 && c.acompte > 0 && <div className="flex justify-between gap-3"><span className="text-gray-600">À la signature (acompte {s.acompte.pct} %)</span><span className="font-medium">{eur(c.acompte)} TTC</span></div>}
+              {c.ttcP > 0 && <div className="flex justify-between gap-3"><span className="text-gray-600">{c.acompte > 0 ? 'À la livraison (solde)' : 'À la livraison'}</span><span className="font-medium">{eur(c.ttcP - c.acompte)} TTC</span></div>}
+              {c.ttcM > 0 && <div className="flex justify-between gap-3"><span className="text-gray-600">Chaque mois, {dureeTxt(c)}</span><span className="font-medium">{eur(c.ttcM)} TTC</span></div>}
+            </div>
+            {s.paiement.trim() && <p className="mt-2 whitespace-pre-line text-xs text-gray-500">{s.paiement}</p>}
           </div>
         </section>
 
-        {/* 6. Accord */}
-        <section className="avoid-break mt-8 grid gap-6 border-t border-gray-200 pt-8 sm:grid-cols-2">
+        {/* Conditions essentielles */}
+        <section className="avoid-break mt-5 border-t border-gray-200 pt-5 text-[13px]">
+          <h3 className="font-semibold">Conditions essentielles</h3>
+          <ul className="mt-2 space-y-1 text-gray-700">
+            {c.ttcM > 0 && <li>• {c.mois ? `Engagement de ${c.mois} mois sur les prestations mensuelles, à partir de leur mise en route.` : 'Prestations mensuelles sans engagement : elles s\'arrêtent quand vous le souhaitez.'}</li>}
+            {c.ttcM > 0 && s.inclus.trim() && <li>• Toujours inclus : {s.inclus.split('\n').filter(Boolean).join(', ').toLowerCase()}.</li>}
+            <li>• Prix en euros, TVA {s.tva} % comprise dans les montants TTC.</li>
+            <li>• Offre valable jusqu'au <strong>{validite}</strong>.</li>
+            {s.visuels.demoUrl && <li>• Démonstration en ligne : <a href={s.visuels.demoUrl} className="text-accent underline">{s.visuels.demoUrl}</a></li>}
+          </ul>
+        </section>
+
+        {/* Accord */}
+        <section className="avoid-break mt-5 grid gap-6 border-t border-gray-200 pt-5 sm:grid-cols-2">
           <div>
             <p className="text-sm font-semibold">Bon pour accord</p>
-            <p className="text-sm text-gray-500">Offres choisies (cochées ci-dessus), date et signature</p>
-            <div className="mt-2 h-24 rounded-xl border border-dashed border-gray-300" />
+            <p className="text-xs text-gray-500">Date et signature, précédées de « Bon pour accord »</p>
+            <div className="mt-2 h-20 rounded-xl border border-dashed border-gray-300" />
           </div>
           <div className="text-sm">
             <p className="font-semibold">Votre contact</p>
@@ -683,6 +655,189 @@ function Proposal({ s, c, numero, onClose, toast }) {
         </section>
       </article>
       <div className="no-print h-10" />
+    </div>
+  );
+}
+
+/* ============================ Formules ============================ */
+function PackCard({ pk, r, actif, ouvert, mois, onChoisir, onPerso }) {
+  return (
+    <div className={'relative flex flex-col rounded-3xl bg-white p-5 transition sm:p-6 ' +
+      (actif ? 'border-2 border-emerald-500 shadow-lg' : pk.recommande ? 'border-2 border-accent shadow-lg' : 'border border-gray-200')}>
+      {pk.recommande && <span className="absolute -top-3 left-5 rounded-full bg-accent px-3 py-1 text-[11px] font-bold uppercase tracking-wide text-white">Recommandé</span>}
+      {actif && <span className="absolute -top-3 right-5 rounded-full bg-emerald-500 px-3 py-1 text-[11px] font-bold uppercase tracking-wide text-white">✓ Choisie</span>}
+      <p className="text-[11px] font-bold uppercase tracking-wider text-gray-500">{pk.sous}</p>
+      <p className="font-display text-2xl font-semibold leading-tight">{pk.nom}</p>
+      <p className="mt-1.5 text-sm leading-snug text-gray-600">{pk.promesse}</p>
+      <ul className="mt-4 space-y-2 text-sm">
+        {(pk.points || []).filter(Boolean).slice(0, 6).map(t => <li key={t} className="flex gap-2"><Check className="h-4 w-4" /><span>{t}</span></li>)}
+      </ul>
+      <div className="mt-auto pt-5">
+        <div className="tabular border-t border-gray-100 pt-4">
+          <p className="font-display text-[28px] font-semibold leading-none">{eur(r.ttcP)}<span className="ml-1 font-sans text-sm font-medium text-gray-500">TTC</span></p>
+          <p className="text-xs text-gray-500">à la commande · {eur(r.htP)} HT</p>
+          {r.ttcM > 0 && <p className="mt-2 font-display text-xl font-semibold leading-none">+ {eur(r.ttcM)}<span className="ml-1 font-sans text-sm font-medium text-gray-500">TTC / mois</span></p>}
+          {r.ttcM > 0 && <p className="text-xs text-gray-500">{eur(r.htM)} HT · {mois ? `pendant ${mois} mois` : 'sans engagement'}</p>}
+          {r.economie > 0.5 && <p className="mt-2 text-xs font-semibold text-emerald-700">Économie : {eur(r.economie)} TTC{mois && r.remM > 0.005 ? ` sur ${mois} mois` : ''}</p>}
+        </div>
+        <button onClick={onChoisir} className={'mt-4 w-full rounded-xl py-3 text-[15px] font-semibold text-white shadow-sm transition active:scale-[.99] ' + (actif ? 'bg-emerald-600' : 'bg-accent hover:brightness-110')}>
+          {actif ? '✓ Formule choisie' : 'Choisir cette formule'}
+        </button>
+        <button onClick={onPerso} className={'mt-2 w-full rounded-xl border py-2.5 text-sm font-semibold transition ' + (ouvert ? 'border-ink bg-ink text-white' : 'border-gray-300 text-ink hover:bg-gray-50')}>
+          {ouvert ? 'Fermer la personnalisation' : 'Personnaliser'}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function PackEditor({ s, pk, r, actif, remiseInput, onPack, onItem, onSave, onReset, onChoisir }) {
+  const fld = (k, l, area) => (
+    <Field label={l}>{area
+      ? <textarea rows={4} className={inputCls + ' text-sm'} value={(pk[k] || []).join('\n')} onChange={e => onPack({ [k]: e.target.value.split('\n') })} />
+      : <input className={inputCls + (k === 'nom' ? ' font-semibold' : '')} value={pk[k] || ''} onChange={e => onPack({ [k]: e.target.value })} />}</Field>
+  );
+  return (
+    <div className="mt-5 rounded-3xl border-2 border-ink bg-white p-4 sm:p-6">
+      <div className="flex flex-wrap items-baseline justify-between gap-2">
+        <p className="font-display text-xl font-semibold">Personnaliser le {pk.nom}</p>
+        <p className="text-sm text-gray-500">Les montants se mettent à jour à chaque modification.</p>
+      </div>
+      <div className="mt-4 grid gap-4 sm:grid-cols-2">
+        {fld('nom', 'Nom du pack')}
+        {fld('sous', 'Sous-titre')}
+        <div className="sm:col-span-2">{fld('promesse', 'Promesse en une phrase')}</div>
+        <div className="sm:col-span-2">{fld('points', 'Points affichés sur la carte (un par ligne, 6 au plus)', true)}</div>
+      </div>
+
+      <p className="mt-6 text-xs font-medium uppercase tracking-wide text-gray-500">Prestations du pack</p>
+      <div className="mt-2 space-y-5">
+        {(s.offres || OFFRES).map(o => {
+          const items = s.prestations.filter(p => (p.offre || 'base') === o.id);
+          if (!items.length) return null;
+          return (
+            <div key={o.id}>
+              <p className="border-b border-gray-100 pb-1 text-sm font-semibold">{o.nom}</p>
+              <div className="divide-y divide-gray-100">
+                {items.map(p => {
+                  const it = pk.items[p.id];
+                  const ligne = it ? packLines(s, { items: { [p.id]: it } })[0] : null;
+                  return (
+                    <div key={p.id} className={'flex flex-wrap items-center gap-x-3 gap-y-2 py-2.5 ' + (it ? '' : 'opacity-60')}>
+                      <button type="button" onClick={() => onItem(p.id, it ? null : {})} aria-pressed={!!it}
+                        className={'grid h-6 w-6 shrink-0 place-items-center rounded-md border transition ' + (it ? 'border-accent bg-accent text-white' : 'border-gray-300 bg-white')}>
+                        {it && <svg className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor"><path fillRule="evenodd" d="M16.7 5.3a1 1 0 010 1.4l-7.5 7.5a1 1 0 01-1.4 0l-3.5-3.5a1 1 0 111.4-1.4l2.8 2.8 6.8-6.8a1 1 0 011.4 0z" clipRule="evenodd"/></svg>}
+                      </button>
+                      <div className="min-w-[180px] flex-1">
+                        <p className="text-sm font-medium leading-snug">{p.nom}</p>
+                        <p className="tabular text-xs text-gray-500">À la carte : {eur(num(p.prix))} HT{p.unite ? ' / ' + p.unite : ''}</p>
+                      </div>
+                      {ligne && (
+                        <div className="flex flex-wrap items-center gap-2">
+                          <div className="relative w-24">
+                            <input type="number" inputMode="decimal" min="0" aria-label="Prix HT dans le pack" value={ligne.prix}
+                              onChange={e => onItem(p.id, { ...it, prix: e.target.value })} className={inputCls + ' tabular py-1.5 pr-6 text-sm'} />
+                            <span className="pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2 text-xs text-gray-400">€</span>
+                          </div>
+                          <input type="number" inputMode="numeric" min="1" aria-label="Quantité" value={ligne.qte}
+                            onChange={e => onItem(p.id, { ...it, qte: e.target.value })} className={inputCls + ' tabular w-16 py-1.5 text-sm'} />
+                          <Segmented value={ligne.type} options={[{ v: 'ponctuel', label: 'Une fois' }, { v: 'mensuel', label: 'Par mois' }]}
+                            onChange={t => onItem(p.id, { ...it, type: t })} />
+                          <span className="tabular w-24 text-right text-sm font-semibold">{eur(r.line(ligne))}<span className="block text-[11px] font-normal text-gray-500">{ligne.type === 'mensuel' ? 'HT / mois' : 'HT'}</span></span>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+
+      <div className="mt-6 grid gap-5 lg:grid-cols-[1fr_1.2fr]">
+        <div className="space-y-4">
+          {remiseInput('ponctuel', 'Remise sur le prix à la commande', pk.id)}
+          {remiseInput('mensuel', 'Remise sur le prix mensuel', pk.id)}
+          <p className="text-xs text-gray-500">La remise affichée au client est toujours calculée par rapport aux tarifs à la carte.</p>
+        </div>
+        <div className="rounded-2xl bg-gray-50 p-2">
+          <TableRemise r={r} tva={s.tva} />
+          {r.economie > 0.5 && <p className="px-3 pb-1 pt-2 text-sm font-semibold text-emerald-700">Économie pour le client : {eur(r.economie)} TTC{r.mois && r.remM > 0.005 ? ` sur ${r.mois} mois` : ''}</p>}
+        </div>
+      </div>
+
+      <div className="mt-6 flex flex-wrap gap-2">
+        <button onClick={onSave} className="rounded-xl bg-accent px-5 py-3 text-sm font-semibold text-white shadow-sm hover:brightness-110">Enregistrer mes modifications</button>
+        {!actif && <button onClick={onChoisir} className="rounded-xl bg-emerald-600 px-5 py-3 text-sm font-semibold text-white">Choisir cette formule</button>}
+        <button onClick={onReset} className="rounded-xl border border-gray-200 px-4 py-3 text-sm font-medium text-gray-600 hover:bg-gray-50">Revenir à la composition d'origine</button>
+      </div>
+    </div>
+  );
+}
+
+// Mode à la carte : comparer la sélection avec une formule, sans rien ajouter sans validation.
+function Comparaison({ s, onProposer }) {
+  const sel = s.prestations.filter(p => p.selected);
+  const [packId, setPackId] = useState('');
+  const [garder, setGarder] = useState(true);
+  if (!sel.length) return null;
+  const overlap = (pk) => sel.filter(p => pk.items[p.id]).length;
+  const auto = s.packs.find(pk => sel.every(p => pk.items[p.id])) || [...s.packs].sort((a, b) => overlap(b) - overlap(a))[0];
+  const pack = s.packs.find(x => x.id === packId) || auto;
+  const { carte, pk, enPlus, horsPack } = comparer(s, pack, garder);
+  const dP = pk.ttcP - carte.ttcP, dM = pk.ttcM - carte.ttcM, dT = pk.totalTTC - carte.totalTTC;
+  const duree = carte.mois ? `sur ${carte.mois} mois` : 'le 1er mois';
+  const bloc = (titre, r, accent) => (
+    <div className={'rounded-2xl p-4 ' + (accent ? 'bg-accent text-white' : 'bg-white ring-1 ring-gray-200')}>
+      <p className={'text-xs font-bold uppercase tracking-wide ' + (accent ? 'text-white/70' : 'text-gray-500')}>{titre}</p>
+      <p className="tabular mt-1 font-display text-2xl font-semibold leading-tight">{eur(r.ttcP)}<span className={'ml-1 font-sans text-xs ' + (accent ? 'text-white/70' : 'text-gray-500')}>TTC à la commande</span></p>
+      {r.ttcM > 0 && <p className="tabular font-semibold">+ {eur(r.ttcM)} <span className={'text-xs font-normal ' + (accent ? 'text-white/70' : 'text-gray-500')}>TTC / mois</span></p>}
+      <p className={'tabular mt-1 text-xs ' + (accent ? 'text-white/70' : 'text-gray-500')}>Total {duree} : {eur(r.totalTTC)} TTC</p>
+    </div>
+  );
+  return (
+    <div className="mt-8 rounded-3xl bg-gray-50 p-4 sm:p-6">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <p className="font-display text-lg font-semibold">Comparer avec une formule</p>
+          <p className="text-sm text-gray-500">La sélection à la carte face à un pack : ce qui est en plus, et la différence de prix.</p>
+        </div>
+        <Segmented value={pack.id} options={s.packs.map(x => ({ v: x.id, label: x.nom.replace(/^Pack\s+/i, '') }))} onChange={setPackId} />
+      </div>
+      <div className="mt-4 grid gap-3 sm:grid-cols-2">
+        {bloc('Sélection à la carte', carte)}
+        {bloc(pack.nom, pk, true)}
+      </div>
+      <div className="tabular mt-3 rounded-2xl bg-white px-4 py-3 text-sm ring-1 ring-gray-200">
+        <span className="font-semibold">Différence avec le {pack.nom} : </span>
+        {signe(dP)} à la commande · {signe(dM)} par mois · <strong>{signe(dT)} {duree}</strong>
+        {pk.economie > 0.5 && <span className="block text-emerald-700">Le pack inclut {eur(pk.economie)} TTC de remise par rapport aux mêmes prestations à la carte.</span>}
+      </div>
+      <div className="mt-4 grid gap-4 sm:grid-cols-2">
+        <div>
+          <p className="text-sm font-semibold">En plus dans le pack {enPlus.length ? `(${enPlus.length})` : ''}</p>
+          {enPlus.length ? (
+            <ul className="mt-1.5 space-y-1 text-sm">{enPlus.map(p => (
+              <li key={p.id} className="flex justify-between gap-3"><span>+ {p.nom}</span><span className="tabular shrink-0 text-gray-500">{eur(pk.lineCat(p))} HT{p.type === 'mensuel' ? '/mois' : ''}</span></li>
+            ))}</ul>
+          ) : <p className="mt-1 text-sm text-gray-500">Rien : le pack contient exactement la sélection.</p>}
+        </div>
+        {horsPack.length > 0 && (
+          <div>
+            <p className="text-sm font-semibold">Choisies à la carte mais pas dans le pack</p>
+            <ul className="mt-1.5 space-y-1 text-sm text-gray-700">{horsPack.map(p => <li key={p.id}>• {p.nom}</li>)}</ul>
+            <label className="mt-2 flex items-center gap-2 text-sm">
+              <input type="checkbox" checked={garder} onChange={e => setGarder(e.target.checked)} className="h-4 w-4 accent-[#1f3a5f]" />
+              Les garder dans la formule (au prix à la carte)
+            </label>
+          </div>
+        )}
+      </div>
+      <button onClick={() => onProposer(pack, garder ? horsPack : [], enPlus)}
+        className="mt-5 w-full rounded-xl bg-accent py-3 text-[15px] font-semibold text-white shadow-sm hover:brightness-110 sm:w-auto sm:px-6">
+        Proposer le {pack.nom} à la place
+      </button>
     </div>
   );
 }
@@ -707,8 +862,27 @@ function App() {
   const setVendeur = (k, v) => set(p => ({ vendeur: { ...p.vendeur, [k]: v } }));
   const setPrest = (id, patch) => set(p => ({ prestations: p.prestations.map(x => x.id === id ? { ...x, ...patch } : x) }));
   const toggle = (k) => setOpen(o => ({ ...o, [k]: !o[k] }));
+  const [perso, setPerso] = useState(''); // formule en cours de personnalisation
+  const setPack = (id, patch) => set(p => ({ packs: p.packs.map(x => x.id === id ? { ...x, ...(typeof patch === 'function' ? patch(x) : patch) } : x) }));
+  const setPackItem = (id, prestId, val) => setPack(id, x => {
+    const items = { ...x.items };
+    if (val === null) delete items[prestId]; else items[prestId] = val;
+    return { items };
+  });
+  const allerOffre = () => { setOpen(o => ({ ...o, offre: true })); setTimeout(() => document.getElementById('offre')?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 30); };
+  const changerMode = (m) => { set({ mode: m }); allerOffre(); };
+  const choisir = (id) => { set({ mode: 'formule', pack: id }); toast((s.packs.find(x => x.id === id) || {}).nom + ' choisi. Le récapitulatif en haut est à jour.'); };
+  const proposer = (pack, garder, enPlus) => {
+    const ajout = [...enPlus.map(p => p.nom), ...garder.map(p => p.nom + ' (gardée)')];
+    if (ajout.length && !confirm(`Passer au ${pack.nom} ?\n\nPrestations ajoutées par rapport à la sélection :\n• ${ajout.join('\n• ')}\n\nValidez seulement si le client est d'accord.`)) return;
+    set(p => ({ mode: 'formule', pack: pack.id,
+      packs: p.packs.map(x => x.id === pack.id ? { ...x, items: { ...x.items, ...Object.fromEntries(garder.map(g => [g.id, {}])) } } : x) }));
+    toast(`${pack.nom} proposé. Votre sélection à la carte reste enregistrée dans l'onglet À la carte.`);
+    allerOffre();
+  };
 
   const c = useMemo(() => compute(s), [s]);
+  const packsCalc = useMemo(() => Object.fromEntries(s.packs.map(pk => [pk.id, calc(s, packLines(s, pk), pk.remises)])), [s]);
   const sugg = useMemo(() => suggestions(s.reponses), [s.reponses]);
   const numero = useMemo(() => {
     const d = today();
@@ -731,7 +905,8 @@ function App() {
   const nouveauClient = () => {
     if (!confirm('Commencer un nouveau client ? La fiche, les réponses, la sélection et les visuels seront effacés. Vos tarifs et vos coordonnées sont conservés.')) return;
     set(p => ({ ...DEFAULTS, client: blankClient, visuels: { logo: '', photos: [], demoUrl: '' }, prestations: p.prestations.map(x => ({ ...x, selected: false })), vendeur: p.vendeur,
-      inclus: p.inclus, paiement: p.paiement, validite: p.validite, tva: p.tva, offres: p.offres }));
+      inclus: p.inclus, paiement: p.paiement, validite: p.validite, tva: p.tva, offres: p.offres, packs: p.packs, mode: 'carte', pack: '' }));
+    setPerso('');
     setOpen({ client: true });
   };
 
@@ -741,34 +916,49 @@ function App() {
   const clientHint = [s.client.entreprise, s.client.responsable].filter(Boolean).join(' · ') || 'Coordonnées du commerçant';
 
   const generate = () => {
-    if (!c.sel.length) { toast('Cochez au moins une prestation avant de générer la proposition.'); setOpen(o => ({ ...o, offre: true })); return; }
+    if (c.mode === 'formule' && !c.pack) { toast('Choisissez une formule avant de générer la proposition.'); allerOffre(); return; }
+    if (!c.sel.length) { toast(c.mode === 'formule' ? 'Cette formule ne contient aucune prestation.' : 'Cochez au moins une prestation avant de générer la proposition.'); allerOffre(); return; }
     setShowProposal(true);
     window.scrollTo(0, 0);
   };
 
   // appelée comme une fonction (et non <RemiseInput/>) pour que le champ garde le focus pendant la saisie
-  const remiseInput = (k, label) => (
-    <div>
-      <p className="mb-1.5 text-xs font-medium uppercase tracking-wide text-gray-500">{label}</p>
-      <div className="flex items-center gap-2">
-        <input type="number" inputMode="decimal" min="0" value={s.remises[k].valeur}
-          onChange={e => set(p => ({ remises: { ...p.remises, [k]: { ...p.remises[k], valeur: e.target.value } } }))}
-          className={inputCls + ' tabular w-28'} />
-        <Segmented value={s.remises[k].mode} options={[{ v: '%', label: '%' }, { v: '€', label: '€' }]}
-          onChange={v => set(p => ({ remises: { ...p.remises, [k]: { ...p.remises[k], mode: v } } }))} />
+  // packId : remise d'une formule ; sinon remise de la vente à la carte
+  const remiseInput = (k, label, packId) => {
+    const pk = packId && s.packs.find(x => x.id === packId);
+    const r = pk ? pk.remises[k] : s.remises[k];
+    const maj = (patch) => pk
+      ? setPack(packId, x => ({ remises: { ...x.remises, [k]: { ...x.remises[k], ...patch } } }))
+      : set(p => ({ remises: { ...p.remises, [k]: { ...p.remises[k], ...patch } } }));
+    return (
+      <div>
+        <p className="mb-1.5 text-xs font-medium uppercase tracking-wide text-gray-500">{label}</p>
+        <div className="flex items-center gap-2">
+          <input type="number" inputMode="decimal" min="0" value={r.valeur} onChange={e => maj({ valeur: e.target.value })} className={inputCls + ' tabular w-28'} />
+          <Segmented value={r.mode} options={[{ v: '%', label: '%' }, { v: '€', label: '€' }]} onChange={v => maj({ mode: v })} />
+        </div>
       </div>
-    </div>
-  );
+    );
+  };
 
   return (
     <>
       <div id="app-main">
         {/* Récapitulatif permanent */}
         <div className="sticky top-0 z-40 border-b border-gray-200 bg-white/90 backdrop-blur" style={{ paddingTop: 'env(safe-area-inset-top)' }}>
-          <div className="mx-auto flex max-w-5xl items-center gap-3 px-4 py-2.5 sm:gap-6 sm:px-6">
-            <div className="grid flex-1 grid-cols-3 gap-2 sm:gap-6">
-              {[['Création initiale', eur(c.htP), eur(c.ttcP) + ' TTC'],
-                ['Mensualité', eur(c.htM), eur(c.ttcM) + ' TTC'],
+          <div className="mx-auto flex max-w-5xl flex-wrap items-center gap-x-6 gap-y-2 px-4 py-2.5 sm:px-6">
+            <div className="flex w-full items-center gap-3 sm:w-auto" role="tablist">
+              <div className="grid flex-1 grid-cols-2 rounded-xl bg-gray-100 p-1 sm:flex-none">
+                {[['carte', 'À la carte'], ['formule', 'Formules']].map(([m, l]) => (
+                  <button key={m} role="tab" aria-selected={s.mode === m} onClick={() => changerMode(m)}
+                    className={'rounded-lg px-4 py-2 text-sm font-bold uppercase tracking-wide transition ' + (s.mode === m ? 'bg-white text-ink shadow-sm' : 'text-gray-500 hover:text-ink')}>{l}</button>
+                ))}
+              </div>
+              <p className="truncate text-xs text-gray-500 sm:hidden">{c.mode === 'formule' ? (c.pack ? c.pack.nom : 'Aucune formule') : `${c.sel.length} presta.`}</p>
+            </div>
+            <div className="grid min-w-0 flex-1 grid-cols-3 gap-2 sm:gap-6">
+              {[[c.mode === 'formule' && c.pack ? c.pack.nom.replace(/^Pack\s+/i, '') + ' · initial' : 'Initial', eur(c.htP), eur(c.ttcP) + ' TTC'],
+                ['Par mois', eur(c.htM), eur(c.ttcM) + ' TTC'],
                 [c.mois ? `Total ${c.mois} mois` : 'Total 1er mois', eur(c.totalHT), eur(c.totalTTC) + ' TTC']].map(([l, v, sub]) => (
                 <div key={l} className="min-w-0">
                   <p className="truncate text-[10.5px] font-medium uppercase tracking-wide text-gray-500 sm:text-[11px]">{l}</p>
@@ -777,7 +967,7 @@ function App() {
                 </div>
               ))}
             </div>
-            <button onClick={generate} className="hidden rounded-xl bg-accent px-5 py-3 text-sm font-semibold text-white shadow-sm transition hover:brightness-110 sm:block">Générer la proposition</button>
+            <button onClick={generate} className="hidden rounded-xl bg-accent px-5 py-3 text-sm font-semibold text-white shadow-sm transition hover:brightness-110 sm:block">Générer la proposition commerciale</button>
           </div>
         </div>
 
@@ -836,7 +1026,7 @@ function App() {
                     <div className="mt-4 flex flex-wrap items-center gap-3 border-t border-gray-200 pt-4">
                       <p className="text-sm text-gray-600"><span className="font-semibold text-ink">{sugg.size} prestations</span> correspondent à ces besoins.</p>
                       <button className="rounded-xl bg-ink px-3.5 py-2 text-sm font-semibold text-white"
-                        onClick={() => { set(p => ({ prestations: p.prestations.map(x => sugg.has(x.id) ? { ...x, selected: true } : x) })); setOpen(o => ({ ...o, offre: true })); toast('Prestations suggérées cochées. Ajustez-les dans le constructeur d\'offre.'); }}>
+                        onClick={() => { set(p => ({ mode: 'carte', prestations: p.prestations.map(x => sugg.has(x.id) ? { ...x, selected: true } : x) })); allerOffre(); toast('Prestations suggérées cochées dans l\'onglet À la carte. Comparez ensuite avec une formule.'); }}>
                         Cocher les suggestions
                       </button>
                     </div>
@@ -847,15 +1037,39 @@ function App() {
           </Section>
 
           {/* 3. Constructeur d'offre */}
-          <Section n="3" title="Constructeur d'offre" hint={c.sel.length ? `${c.sel.length} prestation${c.sel.length > 1 ? 's' : ''} sélectionnée${c.sel.length > 1 ? 's' : ''}` : 'Cochez les prestations, ajustez prix et descriptions'}
+          <div id="offre" className="scroll-mt-32">
+          <Section n="3" title={s.mode === 'formule' ? 'Formules' : 'À la carte'}
+            hint={s.mode === 'formule'
+              ? (c.pack ? `${c.pack.nom} · ${c.sel.length} prestations` : 'Choisissez une des trois formules')
+              : (c.sel.length ? `${c.sel.length} prestation${c.sel.length > 1 ? 's' : ''} sélectionnée${c.sel.length > 1 ? 's' : ''}` : 'Cochez les prestations, ajustez prix et descriptions')}
             open={!!open.offre} onToggle={() => toggle('offre')}>
+            {s.mode === 'formule' && (
+              <div>
+                <div className="grid gap-5 pt-3 md:grid-cols-3">
+                  {s.packs.map(pk => (
+                    <PackCard key={pk.id} pk={pk} r={packsCalc[pk.id]} actif={s.pack === pk.id} ouvert={perso === pk.id} mois={s.engagement}
+                      onChoisir={() => choisir(pk.id)} onPerso={() => setPerso(perso === pk.id ? '' : pk.id)} />
+                  ))}
+                </div>
+                {perso && (() => {
+                  const pk = s.packs.find(x => x.id === perso);
+                  return <PackEditor s={s} pk={pk} r={packsCalc[pk.id]} actif={s.pack === pk.id} remiseInput={remiseInput}
+                    onPack={patch => setPack(pk.id, patch)} onItem={(id, val) => setPackItem(pk.id, id, val)}
+                    onSave={() => { setPerso(''); toast(`${pk.nom} enregistré sur cet appareil.`); }}
+                    onChoisir={() => choisir(pk.id)}
+                    onReset={() => { if (confirm(`Remettre le ${pk.nom} dans sa composition d'origine (prestations, prix, remises, textes) ?`)) setPack(pk.id, { ...PACKS.find(x => x.id === pk.id) }); }} />;
+                })()}
+                <p className="mt-5 text-sm text-gray-500">Les formules utilisent les prix du catalogue (onglet À la carte). Une prestation n'apparaît qu'une fois par formule.</p>
+              </div>
+            )}
+            {s.mode === 'carte' && <>
             {(s.offres || OFFRES).map((o, i) => {
               const items = s.prestations.filter(p => (OFFRE_IDS.includes(p.offre) ? p.offre : 'base') === o.id);
               const r = c.offres.find(x => x.id === o.id);
               return (
                 <div key={o.id} className="mb-8 last:mb-0">
                   <div className="mb-3 flex flex-wrap items-baseline justify-between gap-2 border-b border-gray-100 pb-2">
-                    <h3 className="font-display text-lg font-semibold"><span className="mr-2 text-gray-400">{i === 0 ? '★' : i}</span>{o.nom}</h3>
+                    <h3 className="font-display text-lg font-semibold"><span className="mr-2 text-gray-400">{i + 1}</span>{o.nom}{o.id === 'fidel' && <span className="ml-2 rounded-full bg-gray-100 px-2 py-0.5 align-middle font-sans text-[11px] font-semibold text-gray-600">Option</span>}</h3>
                     <span className="tabular text-sm text-gray-500">{r ? [r.htP > 0 && eur(r.htP) + ' HT', r.htM > 0 && eur(r.htM) + ' HT / mois'].filter(Boolean).join(' + ') : 'rien de coché'}</span>
                   </div>
                   <div className="grid gap-3 lg:grid-cols-2">
@@ -872,8 +1086,8 @@ function App() {
               );
             })}
             <div className="mt-6 rounded-2xl bg-gray-50 p-4 sm:p-5">
-              <p className="font-display text-lg font-semibold">Les offres de la proposition</p>
-              <p className="mb-4 text-sm text-gray-500">Chaque offre apparaît séparément, avec son prix, et le client coche celles qu'il choisit.</p>
+              <p className="font-display text-lg font-semibold">Les catégories</p>
+              <p className="mb-4 text-sm text-gray-500">Leurs noms regroupent les prestations dans la proposition, à la carte comme en formule.</p>
               <div className="space-y-3">
                 {(s.offres || OFFRES).map((o, i) => {
                   const r = c.offres.find(x => x.id === o.id);
@@ -892,16 +1106,19 @@ function App() {
                 })}
               </div>
             </div>
+            <Comparaison s={s} onProposer={proposer} />
+            </>}
           </Section>
+          </div>
 
           {/* 4. Tarifs et remises */}
-          <Section n="4" title="Tarifs et remises" hint={`TVA ${s.tva} % · ${c.mois ? 'engagement ' + c.mois + ' mois' : 'sans engagement'}${c.remP || c.remM ? ' · remise appliquée' : ''}`}
+          <Section n="4" title="Tarifs et remises" hint={`TVA ${s.tva} % · ${c.mois ? 'engagement ' + c.mois + ' mois' : 'sans engagement'}${c.remP + c.remM > 0.005 ? ' · remise appliquée' : ''}`}
             open={!!open.tarifs} onToggle={() => toggle('tarifs')}>
             <div className="grid gap-6 lg:grid-cols-[1fr_340px]">
               <div className="space-y-6">
                 <div className="grid gap-5 sm:grid-cols-2">
-                  {remiseInput('ponctuel', 'Remise sur la création')}
-                  {remiseInput('mensuel', 'Remise sur les mensualités')}
+                  {remiseInput('ponctuel', c.mode === 'formule' && c.pack ? `Remise ${c.pack.nom} · à la commande` : 'Remise sur la création', c.mode === 'formule' && c.pack ? c.pack.id : undefined)}
+                  {remiseInput('mensuel', c.mode === 'formule' && c.pack ? `Remise ${c.pack.nom} · par mois` : 'Remise sur les mensualités', c.mode === 'formule' && c.pack ? c.pack.id : undefined)}
                 </div>
                 <div>
                   <p className="mb-1.5 text-xs font-medium uppercase tracking-wide text-gray-500">Durée d'engagement</p>
@@ -922,8 +1139,8 @@ function App() {
                 </div>
               </div>
               <div className="rounded-2xl bg-gray-50 p-5 text-sm">
-                {[['Création HT', eur(c.brutP)], c.remP ? ['Remise création', '−' + eur(c.remP)] : null, ['Création TTC', eur(c.ttcP)],
-                  ['Mensualité HT', eur(c.brutM)], c.remM ? ['Remise mensuelle', '−' + eur(c.remM)] : null, ['Mensualité TTC', eur(c.ttcM)]]
+                {[['Création HT', eur(c.brutP)], c.remP > 0.005 ? ['Remise création', '−' + eur(c.remP)] : null, ['Création TTC', eur(c.ttcP)],
+                  ['Mensualité HT', eur(c.brutM)], c.remM > 0.005 ? ['Remise mensuelle', '−' + eur(c.remM)] : null, ['Mensualité TTC', eur(c.ttcM)]]
                   .filter(Boolean).map(([l, v]) => <div key={l} className="flex justify-between py-1"><span className="text-gray-600">{l}</span><span className="tabular font-medium">{v}</span></div>)}
                 <div className="mt-2 border-t border-gray-200 pt-2">
                   <div className="flex justify-between py-1 font-semibold"><span>{c.mois ? `Total ${c.mois} mois TTC` : 'Total 1er mois TTC'}</span><span className="tabular">{eur(c.totalTTC)}</span></div>
@@ -994,7 +1211,7 @@ function App() {
 
         {/* Bouton principal mobile */}
         <div className="fixed inset-x-0 bottom-0 z-40 border-t border-gray-200 bg-white/95 p-3 backdrop-blur sm:hidden" style={{ paddingBottom: 'calc(.75rem + env(safe-area-inset-bottom))' }}>
-          <button onClick={generate} className="w-full rounded-xl bg-accent py-3.5 text-base font-semibold text-white shadow-sm active:brightness-110">Générer la proposition</button>
+          <button onClick={generate} className="w-full rounded-xl bg-accent py-3.5 text-base font-semibold text-white shadow-sm active:brightness-110">Générer la proposition commerciale</button>
         </div>
 
         {preview !== null && (
