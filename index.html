@@ -129,6 +129,14 @@ const IDS_SERENITE = [...IDS_CROISSANCE, 'sms', 'fidelite', 'qravis', 'saison', 
 const toItems = (ids) => Object.fromEntries(ids.map(id => [id, {}]));
 const remiseDe = (x) => ({ ponctuel: { mode: '%', valeur: x }, mensuel: { mode: '%', valeur: x } });
 const PACKS = [
+  { id: 'photo', v: 1, groupe: 'unite', nom: 'Pack Photo-Vidéo', sous: 'Uniquement la création visuelle',
+    promesse: 'Une journée de tournage dans votre boutique et le montage de vos vidéos, prêtes pour vos écrans et vos réseaux.',
+    points: ['Tournage photo et vidéo sur place (1 journée)', 'Montage vidéo (1 journée)', 'Vidéos prêtes pour vos écrans en boutique', 'Photos et vidéos pour vos réseaux'],
+    items: toItems(['tournage', 'montage']), remises: remiseDe(0) },
+  { id: 'siteweb', v: 1, groupe: 'unite', nom: 'Pack Site Web', sous: 'Uniquement le site internet',
+    promesse: 'Votre site à votre image, en ligne sur votre propre adresse.',
+    points: ['Création du site sur mesure, adapté au téléphone', 'Nom de domaine (votre adresse internet)', 'Mise en ligne et configuration', 'Hébergement du site'],
+    items: toItems(['site', 'domaine', 'miseenligne', 'hebergement']), remises: remiseDe(0) },
   { id: 'signature', v: 2, nom: 'Pack Premium', sous: 'Photo-vidéo + visibilité web',
     promesse: 'De belles images de votre boutique et un commerce bien visible sur Google.',
     points: ['Tournage photo et vidéo dans votre boutique', 'Montage vidéo de vos images', 'Fiche Google My Business optimisée', 'Votre site internet, hébergé, avec nom de domaine'],
@@ -1517,12 +1525,24 @@ function App() {
             open={!!open.offre} onToggle={() => toggle('offre')}>
             {s.mode === 'formule' && (
               <div>
-                <div className="grid gap-5 pt-3 md:grid-cols-3">
-                  {s.packs.map(pk => (
-                    <PackCard key={pk.id} pk={pk} r={packsCalc[pk.id]} actif={s.pack === pk.id} ouvert={perso === pk.id} mois={s.engagement}
-                      onChoisir={() => choisir(pk.id)} onPerso={() => setPerso(perso === pk.id ? '' : pk.id)} />
-                  ))}
-                </div>
+                {[['unite', 'À l\'unité', 'Le client ne prend qu\'un seul service.'], ['formule', 'Formules complètes', 'Plusieurs services regroupés, à prix réduit.']].map(([g, titre, sous]) => {
+                  const liste = s.packs.filter(pk => (pk.groupe || 'formule') === g);
+                  if (!liste.length) return null;
+                  return (
+                    <div key={g} className="pt-3">
+                      <div className="mb-4 flex items-baseline gap-3 border-b border-gray-100 pb-2">
+                        <p className="font-display text-lg font-bold">{titre}</p>
+                        <p className="text-sm text-gray-500">{sous}</p>
+                      </div>
+                      <div className={'grid items-start gap-5 ' + (liste.length === 2 ? 'md:grid-cols-2 lg:max-w-[66%]' : 'md:grid-cols-3')}>
+                        {liste.map(pk => (
+                          <PackCard key={pk.id} pk={pk} r={packsCalc[pk.id]} actif={s.pack === pk.id} ouvert={perso === pk.id} mois={s.engagement}
+                            onChoisir={() => choisir(pk.id)} onPerso={() => setPerso(perso === pk.id ? '' : pk.id)} />
+                        ))}
+                      </div>
+                    </div>
+                  );
+                })}
                 {perso && (() => {
                   const pk = s.packs.find(x => x.id === perso);
                   return <PackEditor s={s} pk={pk} r={packsCalc[pk.id]} actif={s.pack === pk.id} remiseInput={remiseInput} onPrio={(id, v) => setPrest(id, { priorite: v })}
