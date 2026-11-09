@@ -50,16 +50,28 @@ const { useState, useEffect, useMemo, useRef } = React;
    ============================================================ */
 // Trois offres bien séparées dans la proposition : la demande du client, puis deux options.
 const OFFRES = [
-  { id: 'base', nom: 'Votre demande', tag: 'Ce que vous nous avez demandé' },
-  { id: 'opt1', nom: 'Option Visibilité', tag: 'Pour attirer de nouveaux clients' },
-  { id: 'opt2', nom: 'Option Gestion mensuelle', tag: 'Pour ne plus vous en occuper' },
+  { id: 'base', v: 2, nom: 'Création de contenu visuel', tag: 'Ce que vous nous avez demandé',
+    explication: "Nous venons filmer et photographier dans votre boutique, puis nous montons les vidéos et retouchons les photos, prêtes pour vos écrans et vos réseaux." },
+  { id: 'web', v: 2, nom: 'Création du site internet', tag: 'Votre vitrine en ligne',
+    explication: "Votre propre site, lisible sur téléphone et ordinateur : vos produits, vos horaires, votre adresse et votre numéro." },
+  { id: 'seo', v: 2, nom: 'Référencement Google (SEO)', tag: 'Être trouvé sur Google',
+    explication: "Le travail pour que votre commerce apparaisse en haut quand quelqu'un cherche sur Google ou Google Maps près de chez vous." },
+  { id: 'social', v: 2, nom: 'Gestion des réseaux sociaux', tag: 'Instagram et Facebook gérés pour vous',
+    explication: "Nous publions pour vous chaque semaine sur Instagram et Facebook, avec vos photos et vidéos, et nous répondons aux commentaires." },
 ];
-const OFFRE_PAR_DEFAUT = { shooting: 'base', video: 'base', ecrans: 'base', site: 'opt1', seo: 'opt1', gbp: 'opt1', miseenligne: 'opt1' };
+const OFFRE_IDS = OFFRES.map(o => o.id);
+const OFFRE_PAR_DEFAUT = {
+  tournage: 'base', montage: 'base', retouche: 'base', ecrans: 'base',
+  site: 'web', miseenligne: 'web', hebergement: 'web', maintenance: 'web', majsite: 'web',
+  seo: 'seo', gbp: 'seo', suiviseo: 'seo',
+  social: 'social', contenus: 'social', tiktok: 'social', reporting: 'social',
+};
 
 const CATALOGUE = [
   { id: 'site', type: 'ponctuel', nom: 'Création de site internet', description: "Site vitrine responsive (5 à 8 pages), design sur mesure, formulaire de contact, optimisé mobile.", prix: 1490, qte: 1, unite: 'site' },
-  { id: 'shooting', type: 'ponctuel', nom: 'Shooting photo professionnel', description: "Demi-journée sur place : produits, équipe, boutique. Photos retouchées, droits d'usage web et réseaux.", prix: 390, qte: 1, unite: 'séance' },
-  { id: 'video', type: 'ponctuel', nom: 'Production vidéo', description: "Tournage et montage de vidéos courtes (produits, savoir-faire, ambiance), prêtes pour vos écrans et vos réseaux.", prix: 190, qte: 3, unite: 'vidéo' },
+  { id: 'tournage', type: 'ponctuel', nom: 'Tournage photo et vidéo sur place', description: "Une demi-journée dans votre boutique : vos produits, vos gestes, votre équipe et l'ambiance.", prix: 390, qte: 1, unite: 'demi-journée' },
+  { id: 'montage', type: 'ponctuel', nom: 'Montage vidéo', description: "Vidéos courtes montées, avec musique et textes, au bon format pour vos écrans et vos réseaux.", prix: 150, qte: 3, unite: 'vidéo' },
+  { id: 'retouche', type: 'ponctuel', nom: 'Retouche photo', description: "Sélection et retouche professionnelle des meilleures photos (lumière, couleurs, cadrage). Lot de 20 photos.", prix: 120, qte: 1, unite: 'lot de 20' },
   { id: 'ecrans', type: 'ponctuel', nom: 'Contenus pour vos écrans en boutique', description: "Montage d'une boucle photo et vidéo au format de vos écrans (horizontal ou vertical), livrée prête à diffuser.", prix: 290, qte: 1, unite: 'boucle' },
   { id: 'seo', type: 'ponctuel', nom: 'SEO et référencement local', description: "Audit, mots-clés locaux, optimisation des pages et des balises, inscription aux annuaires clés.", prix: 390, qte: 1, unite: 'forfait' },
   { id: 'gbp', type: 'ponctuel', nom: 'Optimisation fiche Google Business Profile', description: "Fiche complète : catégories, horaires, photos, produits, réponses aux avis.", prix: 190, qte: 1, unite: 'forfait' },
@@ -72,7 +84,7 @@ const CATALOGUE = [
   { id: 'majsite', type: 'mensuel', nom: 'Mises à jour du site', description: "Modifications de contenu : horaires, produits, actualités, photos (jusqu'à 1 h / mois).", prix: 39, qte: 1, unite: 'mois' },
   { id: 'suiviseo', type: 'mensuel', nom: 'Suivi SEO local', description: "Suivi des positions, publications Google, gestion des avis, ajustements continus.", prix: 99, qte: 1, unite: 'mois' },
   { id: 'reporting', type: 'mensuel', nom: 'Reporting mensuel', description: "Tableau de bord clair : visites, appels, abonnés, avis, et recommandations du mois.", prix: 49, qte: 1, unite: 'mois' },
-].map(p => ({ ...p, selected: false, offre: OFFRE_PAR_DEFAUT[p.id] || 'opt2' }));
+].map(p => ({ ...p, selected: false, offre: OFFRE_PAR_DEFAUT[p.id] || 'base' }));
 
 const QUESTIONS = [
   { id: 'demande', q: 'Pourquoi nous avez-vous contacté ?', multi: true,
@@ -99,17 +111,17 @@ const QUESTIONS = [
 const suggestions = (rep) => {
   const s = new Set();
   const has = (q, o) => (rep[q] || []).includes(o);
-  if (has('demande', 'Shooting photo')) s.add('shooting');
-  if (has('demande', 'Vidéos')) s.add('video');
-  if (has('demande', 'Contenus pour mes écrans en boutique')) ['shooting', 'video', 'ecrans'].forEach(x => s.add(x));
+  if (has('demande', 'Shooting photo')) ['tournage', 'retouche'].forEach(x => s.add(x));
+  if (has('demande', 'Vidéos')) ['tournage', 'montage'].forEach(x => s.add(x));
+  if (has('demande', 'Contenus pour mes écrans en boutique')) ['tournage', 'montage', 'retouche', 'ecrans'].forEach(x => s.add(x));
   if (has('demande', 'Site internet')) s.add('site');
   if (has('demande', 'Réseaux sociaux')) s.add('social');
   if (has('site', 'Non') || has('site', 'Oui, à refaire')) ['site', 'miseenligne', 'hebergement', 'maintenance'].forEach(x => s.add(x));
   if (has('objectif', 'Être visible sur Google') || has('objectif', 'Attirer plus de clients en boutique')) ['gbp', 'seo', 'suiviseo'].forEach(x => s.add(x));
   if (has('objectif', 'Développer les réseaux sociaux') || has('reseaux', 'Personne') || has('reseaux', 'Moi-même')) ['social', 'contenus'].forEach(x => s.add(x));
-  if (has('objectif', 'Image plus premium')) ['shooting', 'video'].forEach(x => s.add(x));
+  if (has('objectif', 'Image plus premium')) ['tournage', 'retouche'].forEach(x => s.add(x));
   if (has('deleguer', 'Oui, entièrement')) ['social', 'contenus', 'majsite', 'reporting'].forEach(x => s.add(x));
-  if (has('nouveaux', 'Oui, c\'est la priorité')) ['gbp', 'video'].forEach(x => s.add(x));
+  if (has('nouveaux', 'Oui, c\'est la priorité')) ['gbp', 'montage'].forEach(x => s.add(x));
   return s;
 };
 
@@ -158,15 +170,22 @@ const load = () => {
     const s = JSON.parse(localStorage.getItem(STORE) || 'null');
     if (!s) return DEFAULTS;
     // fusion prudente avec les valeurs par défaut (nouvelles prestations, nouveaux champs)
-    const prestations = CATALOGUE.map(p => ({ ...p, ...(s.prestations || []).find(x => x.id === p.id) }));
-    const extras = (s.prestations || []).filter(x => !CATALOGUE.some(p => p.id === x.id));
+    const valide = (o) => OFFRE_IDS.includes(o);
+    const prestations = CATALOGUE.map(p => {
+      const st = (s.prestations || []).find(x => x.id === p.id) || {};
+      return { ...p, ...st, offre: valide(st.offre) ? st.offre : p.offre };
+    });
+    // seules les prestations créées à la main sont gardées en plus du catalogue
+    const extras = (s.prestations || []).filter(x => String(x.id).startsWith('perso-')).map(x => ({ ...x, offre: valide(x.offre) ? x.offre : 'base' }));
+    // noms d'offres personnalisés gardés seulement s'ils datent de la version actuelle des offres
+    const offres = OFFRES.map(o => ({ ...o, ...((s.offres || []).find(x => x.id === o.id && x.v === o.v) || {}) }));
     // une seule fois : si la fiche enregistrée est vide, on y met le client préenregistré
     const vide = !Object.values(s.client || {}).some(v => String(v).trim());
     const client = !s.prefillApplied && vide ? PREFILL.client : { ...blankClient, ...s.client };
     const demo = !s.prefillApplied && !(s.visuels || {}).demoUrl ? { demoUrl: PREFILL.demoUrl } : {};
     return { ...DEFAULTS, ...s, prefillApplied: true, client, vendeur: { ...DEFAULTS.vendeur, ...s.vendeur },
       visuels: { ...DEFAULTS.visuels, ...s.visuels, ...demo }, remises: { ...DEFAULTS.remises, ...s.remises }, acompte: { ...DEFAULTS.acompte, ...s.acompte },
-      prestations: [...prestations, ...extras] };
+      prestations: [...prestations, ...extras], offres };
   } catch { return DEFAULTS; }
 };
 
@@ -385,7 +404,7 @@ function OffreCard({ o, i, c, principale }) {
               {principale ? o.tag : `Option ${i} · ${o.tag}`}
             </p>
             <p className="font-display text-2xl font-semibold leading-tight">{o.nom}</p>
-            <p className={'mt-1 text-xs ' + (principale ? 'text-white/70' : 'text-gray-500')}>Cochez la case si vous choisissez cette offre.</p>
+            {o.explication && <p className={'mt-1.5 max-w-md text-sm leading-snug ' + (principale ? 'text-white/85' : 'text-gray-600')}>{o.explication}</p>}
           </div>
         </div>
         <div className="tabular sm:text-right">
@@ -657,7 +676,7 @@ function App() {
     setOpen({ client: true });
   };
 
-  const addCustom = (type) => set(p => ({ prestations: [...p.prestations, { id: 'perso-' + Date.now(), type, nom: 'Nouvelle prestation', description: 'Description de la prestation', prix: 0, qte: 1, unite: '', selected: true, offre: 'base' }] }));
+  const addCustom = (type, offre = 'base') => set(p => ({ prestations: [...p.prestations, { id: 'perso-' + Date.now(), type, nom: 'Nouvelle prestation', description: 'Description de la prestation', prix: 0, qte: 1, unite: '', selected: true, offre }] }));
 
   const answered = QUESTIONS.filter(q => (s.reponses[q.id] || []).length || (s.notes[q.id] || '').trim());
   const clientHint = [s.client.entreprise, s.client.responsable].filter(Boolean).join(' · ') || 'Coordonnées du commerçant';
@@ -771,21 +790,28 @@ function App() {
           {/* 3. Constructeur d'offre */}
           <Section n="3" title="Constructeur d'offre" hint={c.sel.length ? `${c.sel.length} prestation${c.sel.length > 1 ? 's' : ''} sélectionnée${c.sel.length > 1 ? 's' : ''}` : 'Cochez les prestations, ajustez prix et descriptions'}
             open={!!open.offre} onToggle={() => toggle('offre')}>
-            {[['ponctuel', 'Prestations ponctuelles'], ['mensuel', 'Prestations mensuelles']].map(([type, title]) => (
-              <div key={type} className="mb-8 last:mb-0">
-                <div className="mb-3 flex items-baseline justify-between">
-                  <h3 className="font-display text-lg font-semibold">{title}</h3>
-                  <span className="tabular text-sm text-gray-500">{type === 'ponctuel' ? eur(c.brutP) + ' HT' : eur(c.brutM) + ' HT / mois'}</span>
+            {(s.offres || OFFRES).map((o, i) => {
+              const items = s.prestations.filter(p => (OFFRE_IDS.includes(p.offre) ? p.offre : 'base') === o.id);
+              const r = c.offres.find(x => x.id === o.id);
+              return (
+                <div key={o.id} className="mb-8 last:mb-0">
+                  <div className="mb-3 flex flex-wrap items-baseline justify-between gap-2 border-b border-gray-100 pb-2">
+                    <h3 className="font-display text-lg font-semibold"><span className="mr-2 text-gray-400">{i === 0 ? '★' : i}</span>{o.nom}</h3>
+                    <span className="tabular text-sm text-gray-500">{r ? [r.htP > 0 && eur(r.htP) + ' HT', r.htM > 0 && eur(r.htM) + ' HT / mois'].filter(Boolean).join(' + ') : 'rien de coché'}</span>
+                  </div>
+                  <div className="grid gap-3 lg:grid-cols-2">
+                    {items.map(p => (
+                      <PrestationCard key={p.id} p={p} offres={s.offres || OFFRES} suggested={sugg.has(p.id)} onChange={patch => setPrest(p.id, patch)}
+                        onRemove={p.id.startsWith('perso-') ? () => set(prev => ({ prestations: prev.prestations.filter(x => x.id !== p.id) })) : null} />
+                    ))}
+                  </div>
+                  <div className="mt-3 flex flex-wrap gap-4 text-sm font-medium text-accent">
+                    <button onClick={() => addCustom('ponctuel', o.id)} className="hover:underline">+ Prestation (une fois)</button>
+                    <button onClick={() => addCustom('mensuel', o.id)} className="hover:underline">+ Abonnement (par mois)</button>
+                  </div>
                 </div>
-                <div className="grid gap-3 lg:grid-cols-2">
-                  {s.prestations.filter(p => p.type === type).map(p => (
-                    <PrestationCard key={p.id} p={p} offres={s.offres || OFFRES} suggested={sugg.has(p.id)} onChange={patch => setPrest(p.id, patch)}
-                      onRemove={p.id.startsWith('perso-') ? () => set(prev => ({ prestations: prev.prestations.filter(x => x.id !== p.id) })) : null} />
-                  ))}
-                </div>
-                <button onClick={() => addCustom(type)} className="mt-3 text-sm font-medium text-accent hover:underline">+ Ajouter une prestation {type === 'mensuel' ? 'mensuelle' : 'ponctuelle'}</button>
-              </div>
-            ))}
+              );
+            })}
             <div className="mt-6 rounded-2xl bg-gray-50 p-4 sm:p-5">
               <p className="font-display text-lg font-semibold">Les offres de la proposition</p>
               <p className="mb-4 text-sm text-gray-500">Chaque offre apparaît séparément, avec son prix, et le client coche celles qu'il choisit.</p>
@@ -793,12 +819,15 @@ function App() {
                 {(s.offres || OFFRES).map((o, i) => {
                   const r = c.offres.find(x => x.id === o.id);
                   return (
-                    <div key={o.id} className="grid gap-2 sm:grid-cols-[1fr_1.4fr_auto] sm:items-center">
+                    <div key={o.id} className="grid gap-2 border-b border-gray-200 pb-3 last:border-0 sm:grid-cols-[1fr_1.4fr_auto] sm:items-center">
                       <input className={inputCls + ' font-semibold'} value={o.nom} aria-label={'Nom de l\'offre ' + (i + 1)}
                         onChange={e => set(p => ({ offres: (p.offres || OFFRES).map(x => x.id === o.id ? { ...x, nom: e.target.value } : x) }))} />
                       <input className={inputCls + ' text-sm'} value={o.tag} aria-label="Phrase d'accroche"
                         onChange={e => set(p => ({ offres: (p.offres || OFFRES).map(x => x.id === o.id ? { ...x, tag: e.target.value } : x) }))} />
                       <span className="tabular text-sm text-gray-600 sm:text-right">{r ? `${r.items.length} presta. · ${eur(r.ttcP)} + ${eur(r.ttcM)}/mois TTC` : 'vide'}</span>
+                      <textarea rows={2} className={inputCls + ' text-sm sm:col-span-3'} value={o.explication || ''} aria-label="Explication simple"
+                        placeholder="En une phrase simple : c'est quoi ?"
+                        onChange={e => set(p => ({ offres: (p.offres || OFFRES).map(x => x.id === o.id ? { ...x, explication: e.target.value } : x) }))} />
                     </div>
                   );
                 })}
