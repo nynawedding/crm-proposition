@@ -591,15 +591,24 @@ function TableRemise({ r, tva, dense }) {
   if (!cols.length) return null;
   const td = dense ? 'px-3 py-1.5' : 'px-3 py-2';
   return (
+    <>
     <table className="tabular w-full text-[13px]">
       <thead><tr className="text-left text-[11px] uppercase tracking-wide text-gray-500"><th className={td + ' font-semibold'} />{cols.map(c => <th key={c[0]} className={td + ' text-right font-semibold'}>{c[0]}</th>)}</tr></thead>
       <tbody className="divide-y divide-gray-100">
         <tr><td className={td + ' text-gray-600'}>Prix à la carte HT</td>{cols.map(c => <td key={c[0]} className={td + ' text-right'}>{eur(c[1])}</td>)}</tr>
-        {cols.some(c => c[2] > 0.005) && <tr className="text-emerald-700"><td className={td}>Remise commerciale</td>{cols.map(c => <td key={c[0]} className={td + ' text-right'}>{c[2] > 0.005 ? '− ' + eur(c[2]) : '—'}</td>)}</tr>}
+        {cols.some(c => c[2] > 0.005) && <tr className="bg-emerald-50 text-[14px] font-bold text-emerald-800"><td className={td}>🎁 Votre remise</td>{cols.map(c => <td key={c[0]} className={td + ' text-right'}>{c[2] > 0.005 ? <>− {eur(c[2])}<span className="block text-[11px] font-semibold">soit − {Math.round(c[2] / c[1] * 100)} %</span></> : '—'}</td>)}</tr>}
         <tr className="font-semibold"><td className={td}>Prix final HT</td>{cols.map(c => <td key={c[0]} className={td + ' text-right'}>{eur(c[3])}</td>)}</tr>
         <tr className="font-semibold"><td className={td}>Prix final TTC <span className="font-normal text-gray-500">(TVA {tva} %)</span></td>{cols.map(c => <td key={c[0]} className={td + ' text-right'}>{eur(c[4])}</td>)}</tr>
       </tbody>
     </table>
+    {r.economie > 0.5 && (
+      <div className="m-2 rounded-xl bg-emerald-600 px-4 py-3 text-white">
+        <p className="text-[11px] font-bold uppercase tracking-wider text-white/80">Vos économies</p>
+        <p className="font-display text-2xl font-bold leading-tight">{eur(r.economie)} TTC{r.mois && r.remM > 0.005 ? <span className="font-sans text-sm font-semibold"> sur {r.mois} mois</span> : ''}</p>
+        <p className="text-xs text-white/85">par rapport à nos tarifs habituels.</p>
+      </div>
+    )}
+    </>
   );
 }
 
@@ -629,7 +638,7 @@ function BlocCard({ o, r, c, large, cocher, exclus, onToggle, prixLigne, pris, o
                 <p className="flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-wider text-gray-900"><span className="h-2 w-2 rounded-full" style={{ background: coul }} />Création</p>
                 <p className="text-[11px] text-gray-500">Payée une seule fois</p>
               </div>
-              <p className="tabular text-right font-display text-lg font-bold leading-none">{eur(r.bP)} <span className="font-sans text-[11px] font-semibold text-gray-500">HT</span>{r.bP - r.htP > 0.005 && <span className="block font-sans text-[10.5px] font-semibold text-emerald-700">remise − {eur(r.bP - r.htP)} → {eur(r.htP)} HT</span>}<span className="block font-sans text-[10px] font-medium text-gray-400">{eur(r.ttcP)} TTC</span></p>
+              <p className="tabular text-right font-display text-lg font-bold leading-none">{eur(r.bP)} <span className="font-sans text-[11px] font-semibold text-gray-500">HT</span></p>
             </div>
             <ul className="mt-2 divide-y divide-gray-100 overflow-hidden rounded-2xl border border-gray-200">{creations.map(ligne)}</ul>
           </div>
@@ -641,7 +650,7 @@ function BlocCard({ o, r, c, large, cocher, exclus, onToggle, prixLigne, pris, o
                 <p className="flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-wider text-sky-900"><span className="text-sm leading-none">↻</span>Abonnement · au choix</p>
                 <p className="text-[11px] text-sky-900/70">Facultatif, sans obligation</p>
               </div>
-              <p className="tabular text-right font-display text-lg font-bold leading-none text-sky-900">{eur(r.bM)} <span className="font-sans text-[11px] font-semibold text-sky-900/70">HT / mois</span>{r.bM - r.htM > 0.005 && <span className="block font-sans text-[10.5px] font-semibold text-emerald-700">remise − {eur(r.bM - r.htM)} → {eur(r.htM)} HT</span>}<span className="block font-sans text-[10px] font-medium text-sky-900/60">{eur(r.ttcM)} TTC</span></p>
+              <p className="tabular text-right font-display text-lg font-bold leading-none text-sky-900">{eur(r.bM)} <span className="font-sans text-[11px] font-semibold text-sky-900/70">HT / mois</span></p>
             </div>
             {[['⚙ Frais techniques', services.filter(estTechnique)], ['↻ Nos services', services.filter(p => !estTechnique(p))]].filter(([, l]) => l.length).map(([titre, l]) => (
               <div key={titre} className="mt-2">
@@ -788,11 +797,6 @@ function Proposal({ s, c, cTous, numero, onClose, toast, onExclu, onChoix, onDev
               </div>
             ))}
           </div>
-          {c.economie > 0.5 && (
-            <div className="border-t border-gray-100 bg-emerald-50 px-5 py-3 text-sm sm:px-7">
-              <p className="font-semibold text-emerald-800">✓ Vous économisez {eur(c.economie)} TTC{c.mois && c.remM > 0.005 ? ` sur ${c.mois} mois` : ''}{formule ? ' par rapport aux mêmes prestations à la carte.' : ' grâce à la remise commerciale.'}</p>
-            </div>
-          )}
         </section>
         )}
 
@@ -1232,7 +1236,6 @@ function PackEditor({ s, pk, r, actif, remiseInput, onPack, onItem, onSave, onRe
         </div>
         <div className="rounded-2xl bg-gray-50 p-2">
           <TableRemise r={r} tva={s.tva} />
-          {r.economie > 0.5 && <p className="px-3 pb-1 pt-2 text-sm font-semibold text-emerald-700">Économie pour le client : {eur(r.economie)} TTC{r.mois && r.remM > 0.005 ? ` sur ${r.mois} mois` : ''}</p>}
         </div>
       </div>
 
