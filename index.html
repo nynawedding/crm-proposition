@@ -210,7 +210,8 @@ const DEFAULTS = {
   pack: '',        // formule choisie
   packs: PACKS,
   combos: COMBOS,
-  choisi: {},  // formule ou packs choisis par le client → devis
+  choisi: {},
+  optionOuverte: false, // option Fidéliser repliée dans la proposition  // formule ou packs choisis par le client → devis
   exclus: {},  // prestations décochées devant le client dans « Nos packs » (sauf indispensables)
   remises: { ponctuel: { mode: '%', valeur: 0 }, mensuel: { mode: '%', valeur: 0 } },
   tva: 20,
@@ -407,7 +408,7 @@ function combos(s, c) {
     // prix après remise globale, puis remise de la formule
     const bP = somme(unefois) * kP, bM = somme(mensuel) * kM;
     const htP = bP * (1 - r), htM = bM * (1 - r);
-    const prixMois = (p) => c.line(p) * kM * (1 - r) * t; // TTC / mois de la ligne dans la formule
+    const prixMois = (p) => c.line(p) * kM * (1 - r); // HT / mois de la ligne dans la formule
     return { ...k, blocs, bP, bM, htP, htM, ttcP: htP * t, ttcM: htM * t, unefois, mensuel, mensTous, inclus, prixMois,
       eco: ((bP - htP) + (bM - htM) * c.moisCalc) * t, totalTTC: (htP + htM * c.moisCalc) * t };
   }).filter(Boolean);
@@ -548,7 +549,7 @@ function buildText(s, c, numero) {
   L.push(`Bonjour${cl.responsable ? ' ' + cl.responsable.split(' ')[0] : ''},`, '');
   L.push(`Voici notre proposition pour ${cl.entreprise || 'votre commerce'} (devis ${numero}).`, '');
   const kombi = formule ? [] : combos(s, c);
-  const prixTTC = (a, m) => [a > 0 && eur(a) + ' TTC', m > 0 && (a > 0 ? 'puis ' : '') + eur(m) + ' TTC / mois'].filter(Boolean).join(', ');
+  const prixTTC = (a, m) => [a > 0 && eur(a / (1 + num(s.tva) / 100)) + ' HT', m > 0 && (a > 0 ? 'puis ' : '') + eur(m / (1 + num(s.tva) / 100)) + ' HT / mois'].filter(Boolean).join(', ');
   if (kombi.length) L.push('NOS PACKS (chacun peut être pris seul) :');
   else L.push(`${formule ? c.pack.nom.toUpperCase() : 'VOTRE SÉLECTION SUR MESURE'} : ${prixCourt(c)}`);
   if (formule && c.pack.promesse) L.push(c.pack.promesse);
@@ -618,7 +619,7 @@ function BlocCard({ o, r, c, large, cocher, exclus, onToggle, prixLigne, pris, o
                 <p className="flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-wider text-gray-900"><span className="h-2 w-2 rounded-full" style={{ background: coul }} />Création</p>
                 <p className="text-[11px] text-gray-500">Payée une seule fois</p>
               </div>
-              <p className="tabular text-right font-display text-lg font-bold leading-none">{eur(r.ttcP)}<span className="block font-sans text-[10px] font-medium text-gray-500">TTC</span></p>
+              <p className="tabular text-right font-display text-lg font-bold leading-none">{eur(r.htP)} <span className="font-sans text-[11px] font-semibold text-gray-500">HT</span><span className="block font-sans text-[10px] font-medium text-gray-400">{eur(r.ttcP)} TTC</span></p>
             </div>
             <ul className="mt-2 divide-y divide-gray-100 overflow-hidden rounded-2xl border border-gray-200">{creations.map(ligne)}</ul>
           </div>
@@ -630,7 +631,7 @@ function BlocCard({ o, r, c, large, cocher, exclus, onToggle, prixLigne, pris, o
                 <p className="flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-wider text-sky-900"><span className="text-sm leading-none">↻</span>Abonnement · au choix</p>
                 <p className="text-[11px] text-sky-900/70">Facultatif, sans obligation</p>
               </div>
-              <p className="tabular text-right font-display text-lg font-bold leading-none text-sky-900">{eur(r.ttcM)}<span className="block font-sans text-[10px] font-medium text-sky-900/70">TTC / mois</span></p>
+              <p className="tabular text-right font-display text-lg font-bold leading-none text-sky-900">{eur(r.htM)} <span className="font-sans text-[11px] font-semibold text-sky-900/70">HT / mois</span><span className="block font-sans text-[10px] font-medium text-sky-900/60">{eur(r.ttcM)} TTC</span></p>
             </div>
             <ul className="mt-2 divide-y divide-sky-100 overflow-hidden rounded-xl bg-white">{services.map(ligne)}</ul>
           </div>
@@ -675,7 +676,7 @@ function LigneMois({ p, on, fort, prix, onToggle, lecture, suffixe = '' }) {
   );
 }
 
-function Proposal({ s, c, cTous, numero, onClose, toast, onExclu, onChoix, onDevis }) {
+function Proposal({ s, c, cTous, numero, onClose, toast, onExclu, onChoix, onDevis, onOption }) {
   const cl = s.client, v = s.vendeur;
   const validite = fmtDate(addDays(today(), num(s.validite)));
   const formule = c.mode === 'formule' && c.pack;
@@ -687,7 +688,7 @@ function Proposal({ s, c, cTous, numero, onClose, toast, onExclu, onChoix, onDev
   const prixBloc = (o) => c.offres.find(x => x.id === o.id) || { ttcP: 0, ttcM: 0 };
   const sommeL = (arr) => arr.reduce((a, p) => a + c.line(p), 0);
   const kP = sommeL(c.ponct) ? c.htP / sommeL(c.ponct) : 1, kM = sommeL(c.mens) ? c.htM / sommeL(c.mens) : 1;
-  const prixLigne = (p) => c.line(p) * (p.type === 'mensuel' ? kM : kP) * (1 + num(s.tva) / 100);
+  const prixLigne = (p) => c.line(p) * (p.type === 'mensuel' ? kM : kP); // HT, remise globale comprise
   const carte = { exclus: formule ? {} : (s.exclus || {}), onToggle: formule ? null : onExclu, prixLigne, c };
   const ch = s.choisi || {};
   const choixPack = (id) => onChoix({ formule: null, packs: (ch.packs || []).includes(id) ? ch.packs.filter(x => x !== id) : [...(ch.packs || []), id] });
@@ -711,9 +712,9 @@ function Proposal({ s, c, cTous, numero, onClose, toast, onExclu, onChoix, onDev
   };
 
   const tuiles = [
-    c.ttcP > 0 && ['À la commande', c.ttcP, `${eur(c.htP)} HT · une seule fois`],
-    c.ttcM > 0 && ['Chaque mois', c.ttcM, `${eur(c.htM)} HT · ${dureeTxt(c)}`],
-    c.ttcM > 0 && [c.mois ? `Total sur ${c.mois} mois` : 'Total du 1er mois', c.totalTTC, `${eur(c.totalHT)} HT, tout compris`],
+    c.ttcP > 0 && ['À la commande', c.htP, `${eur(c.ttcP)} TTC · une seule fois`],
+    c.ttcM > 0 && ['Chaque mois', c.htM, `${eur(c.ttcM)} TTC · ${dureeTxt(c)}`],
+    c.ttcM > 0 && [c.mois ? `Total sur ${c.mois} mois` : 'Total du 1er mois', c.totalHT, `${eur(c.totalTTC)} TTC, tout compris`],
   ].filter(Boolean);
 
   return (
@@ -761,7 +762,7 @@ function Proposal({ s, c, cTous, numero, onClose, toast, onExclu, onChoix, onDev
             {tuiles.map(([l, val, sub]) => (
               <div key={l} className="px-5 py-4 sm:px-6">
                 <p className="text-[11px] font-semibold uppercase tracking-wide text-gray-500">{l}</p>
-                <p className="tabular font-display text-[28px] font-semibold leading-tight">{eur(val)}<span className="ml-1 font-sans text-sm font-medium text-gray-500">TTC</span></p>
+                <p className="tabular font-display text-[28px] font-semibold leading-tight">{eur(val)}<span className="ml-1 font-sans text-sm font-medium text-gray-500">HT</span></p>
                 <p className="tabular text-xs text-gray-500">{sub}</p>
               </div>
             ))}
@@ -780,14 +781,26 @@ function Proposal({ s, c, cTous, numero, onClose, toast, onExclu, onChoix, onDev
           <div className={'mt-3 grid items-start gap-4 ' + cols(principaux.length)}>
             {principaux.map(o => <BlocCard key={o.id} o={o} r={prixBloc(o)} {...carte} cocher={avecCombos} pris={(ch.packs || []).includes(o.id)} onPrendre={() => choixPack(o.id)} />)}
           </div>
-          {option && <div className="mt-4"><BlocCard o={option} r={prixBloc(option)} {...carte} large cocher={avecCombos} pris={(ch.packs || []).includes(option.id)} onPrendre={() => choixPack(option.id)} /></div>}
+          {option && (
+            <div className="mt-4">
+              <button type="button" onClick={onOption} aria-pressed={!!s.optionOuverte}
+                className={'flex w-full items-center gap-3 rounded-2xl border-2 border-dashed px-4 py-3 text-left transition ' + (s.optionOuverte ? 'no-print border-transparent bg-amber-50' : 'no-print border-amber-300 hover:bg-amber-50')}>
+                <span className={'grid h-5 w-5 shrink-0 place-items-center rounded-md border-2 text-[12px] font-bold ' + (s.optionOuverte ? 'border-amber-700 bg-amber-700 text-white' : 'border-amber-500')}>{s.optionOuverte && '✓'}</span>
+                <span className="min-w-0 flex-1">
+                  <span className="block text-sm font-semibold text-amber-900">{s.optionOuverte ? 'Option affichée' : '+ Ajouter l\'option'} : {option.nom.replace(/^Option\s+/, '')}</span>
+                  <span className="block text-xs text-amber-900/70">{option.tag}. Cliquez pour {s.optionOuverte ? 'la masquer' : 'la découvrir'}.</span>
+                </span>
+              </button>
+              {s.optionOuverte && <div className="mt-3"><BlocCard o={option} r={prixBloc(option)} {...carte} large cocher={avecCombos} pris={(ch.packs || []).includes(option.id)} onPrendre={() => choixPack(option.id)} /></div>}
+            </div>
+          )}
         </section>
 
         {/* Formules : regrouper les packs à prix réduit */}
         {avecCombos && (
           <section className="avoid-break mt-8">
             <h3 className="font-display text-xl font-semibold">Nos formules : regroupez et économisez</h3>
-            <p className="text-sm text-gray-500">Les mêmes prestations que les packs ci-dessus, regroupées à prix réduit. Prix TTC, remises comprises.</p>
+            <p className="text-sm text-gray-500">Les mêmes prestations que les packs ci-dessus, regroupées à prix réduit. Prix hors taxes (HT), remises comprises ; TVA {s.tva} % en sus.</p>
             <div className={'mt-5 grid items-start gap-4 ' + cols(kombi.length)}>
               {kombi.map(k => {
                 const fort = k.recommande;
@@ -803,14 +816,16 @@ function Proposal({ s, c, cTous, numero, onClose, toast, onExclu, onChoix, onDev
                       {k.ttcP > 0 && (
                         <div>
                           <p className={'text-xs font-semibold uppercase tracking-wide ' + (fort ? 'text-white/70' : 'text-gray-500')}>À la commande, une seule fois</p>
-                          <p className="font-display text-[32px] font-semibold leading-none">{eur(k.ttcP)}<span className={'ml-1 font-sans text-sm font-medium ' + (fort ? 'text-white/70' : 'text-gray-500')}>TTC</span></p>
+                          <p className="font-display text-[32px] font-semibold leading-none">{eur(k.htP)}<span className={'ml-1 font-sans text-sm font-medium ' + (fort ? 'text-white/70' : 'text-gray-500')}>HT</span></p>
+                          <p className={'text-xs ' + (fort ? 'text-white/60' : 'text-gray-400')}>soit {eur(k.ttcP)} TTC</p>
                           <p className={'mt-1.5 text-[13px] leading-snug ' + (fort ? 'text-white/85' : 'text-gray-600')}>pour : {k.unefois.map(p => p.court || p.nom).join(' · ')}</p>
                         </div>
                       )}
                       {k.mensTous.length > 0 && (
                         <div className={k.ttcP > 0 ? 'mt-4 border-t pt-3 ' + (fort ? 'border-white/20' : 'border-gray-100') : ''}>
                           <p className={'text-xs font-semibold uppercase tracking-wide ' + (fort ? 'text-white/70' : 'text-gray-500')}>{k.ttcP > 0 ? 'Puis chaque mois' : 'Chaque mois'}{c.mois ? ` (${c.mois} mois)` : ''} · services choisis</p>
-                          <p className="font-display text-2xl font-semibold leading-none">{eur(k.ttcM)}<span className={'ml-1 font-sans text-sm font-medium ' + (fort ? 'text-white/70' : 'text-gray-500')}>TTC / mois</span></p>
+                          <p className="font-display text-2xl font-semibold leading-none">{eur(k.htM)}<span className={'ml-1 font-sans text-sm font-medium ' + (fort ? 'text-white/70' : 'text-gray-500')}>HT / mois</span></p>
+                          <p className={'text-xs ' + (fort ? 'text-white/60' : 'text-gray-400')}>soit {eur(k.ttcM)} TTC / mois</p>
                           <p className={'mt-1 text-xs ' + (fort ? 'text-white/70' : 'text-gray-500')}>Uniquement les services cochés dans les packs :</p>
                           <ul className={'mt-2 divide-y overflow-hidden rounded-xl ' + (fort ? 'divide-white/10 bg-white/5' : 'divide-gray-100 bg-gray-50')}>
                             {k.mensTous.map(p => <LigneMois key={p.id} p={p} on fort={fort} prix={k.prixMois(p)} lecture />)}
@@ -894,7 +909,7 @@ function Proposal({ s, c, cTous, numero, onClose, toast, onExclu, onChoix, onDev
           <div className="mx-auto flex max-w-[1040px] flex-wrap items-center gap-3">
             <div className="min-w-0 flex-1">
               <p className="truncate text-sm font-semibold">Choix : {dv.titre}</p>
-              <p className="tabular text-xs text-gray-500">{[dv.P.ttc > 0 && eur(dv.P.ttc) + ' TTC une fois', dv.M.ttc > 0 && eur(dv.M.ttc) + ' TTC / mois'].filter(Boolean).join(' · ')}</p>
+              <p className="tabular text-xs text-gray-500">{[dv.P.ht > 0 && eur(dv.P.ht) + ' HT une fois', dv.M.ht > 0 && eur(dv.M.ht) + ' HT / mois'].filter(Boolean).join(' · ')}</p>
             </div>
             <button onClick={onDevis} className="rounded-xl bg-emerald-600 px-5 py-3 text-sm font-semibold text-white shadow-sm hover:brightness-110">Éditer le devis →</button>
           </div>
@@ -1667,7 +1682,7 @@ function App() {
 
       {showProposal && !showDevis && <Proposal s={s} c={c} cTous={cTous} numero={numero} onClose={() => setShowProposal(false)} toast={toast}
         onExclu={(pid) => set(p => ({ exclus: { ...(p.exclus || {}), [pid]: !(p.exclus || {})[pid] } }))}
-        onChoix={(choisi) => set({ choisi })} onDevis={() => { setShowDevis(true); window.scrollTo(0, 0); }} />}
+        onChoix={(choisi) => set({ choisi })} onOption={() => set(p => ({ optionOuverte: !p.optionOuverte }))} onDevis={() => { setShowDevis(true); window.scrollTo(0, 0); }} />}
       {showProposal && showDevis && (() => { const d = devisCalc(s, c); return d
         ? <Devis s={s} d={d} numero={numero} toast={toast} onBack={() => setShowDevis(false)} />
         : (setTimeout(() => setShowDevis(false)), null); })()}
