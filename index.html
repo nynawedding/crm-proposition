@@ -54,49 +54,50 @@ const { useState, useEffect, useMemo, useRef } = React;
    ============================================================ */
 // Les catégories de la vente à la carte : trois blocs + une option complémentaire.
 const OFFRES = [
-  { id: 'base', v: 3, nom: 'Création visuelle', tag: 'Photos et vidéos de votre boutique',
+  { id: 'base', v: 4, nom: 'Pack Création visuelle', tag: 'Photo, vidéo, montage, pour vos écrans',
     explication: "Nous venons filmer et photographier dans votre boutique, puis nous montons les vidéos et retouchons les photos, prêtes pour vos écrans et vos réseaux." },
-  { id: 'web', v: 3, nom: 'Visibilité web', tag: 'Votre site et Google',
-    explication: "Votre propre site, lisible sur téléphone et ordinateur, et le travail pour apparaître en haut sur Google et Google Maps près de chez vous." },
-  { id: 'social', v: 3, nom: 'Communication & acquisition', tag: 'Réseaux sociaux et campagnes',
-    explication: "Nous publions pour vous sur Instagram et Facebook et nous préparons vos campagnes pour faire venir de nouveaux clients." },
-  { id: 'fidel', v: 3, nom: 'Fidélisation & image de marque', tag: 'Option complémentaire',
-    explication: "Faire revenir vos clients : carte de fidélité, SMS aux clients qui l'acceptent, avis Google." },
+  { id: 'web', v: 4, nom: 'Pack Visibilité web', tag: 'Google My Business, site internet, hébergement',
+    explication: "Votre fiche Google et votre propre site, pour être trouvé sur Google et Google Maps près de chez vous. Vous cochez ce dont vous avez besoin." },
+  { id: 'social', v: 4, nom: 'Pack Communiquer', tag: 'Conquérir de nouveaux clients',
+    explication: "Un plan marketing, des contenus publiés pour vous et des articles pour Google, pour faire venir de nouveaux clients." },
+  { id: 'fidel', v: 4, nom: "Option Fidéliser & développer l'image de marque", tag: 'Option complémentaire',
+    explication: "Faire revenir vos clients : base clients, SMS, carte de fidélité avec QR code, avis Google et événements (Noël, anniversaires, Ramadan)." },
 ];
 const OFFRE_IDS = OFFRES.map(o => o.id);
 const OFFRE_PAR_DEFAUT = {
   tournage: 'base', montage: 'base', retouche: 'base', ecrans: 'base',
-  site: 'web', miseenligne: 'web', hebergement: 'web', maintenance: 'web', majsite: 'web', seo: 'web', suiviseo: 'web', blog: 'web',
-  social: 'social', contenus: 'social', reels: 'social', tiktok: 'social', planmkt: 'social', saison: 'social', reporting: 'social',
-  formulaire: 'fidel', fidelite: 'fidel', sms: 'fidel', qravis: 'fidel',
+  seo: 'web', suiviseo: 'web', site: 'web', hebergement: 'web', domaine: 'web', miseenligne: 'web', maintenance: 'web', majsite: 'web',
+  planmkt: 'social', contenus: 'social', social: 'social', blog: 'social', reels: 'social', tiktok: 'social', reporting: 'social',
+  formulaire: 'fidel', sms: 'fidel', fidelite: 'fidel', qravis: 'fidel', saison: 'fidel',
 };
 // ancien bloc « Référencement Google » : rattaché à Visibilité web
 const remapOffre = (o) => (o === 'seo' ? 'web' : o);
 
 const CATALOGUE = [
-  { id: 'site', type: 'ponctuel', nom: 'Création de site internet', description: "Site vitrine responsive (5 à 8 pages), design sur mesure, formulaire de contact, optimisé mobile.", prix: 1490, qte: 1, unite: 'site' },
   { id: 'tournage', type: 'ponctuel', nom: 'Tournage photo et vidéo sur place', description: "Une journée dans votre boutique : vos produits, vos gestes, votre équipe et l'ambiance, en photo et en vidéo.", prix: 600, qte: 1, unite: 'journée' },
-  { id: 'montage', type: 'ponctuel', nom: 'Montage vidéo', description: "Une journée de montage : choix des meilleures prises, montage, musique, textes, et export aux formats de vos écrans et réseaux.", prix: 450, qte: 1, unite: 'journée' },
   { id: 'retouche', type: 'ponctuel', nom: 'Retouche photo', description: "Sélection et retouche professionnelle des meilleures photos (lumière, couleurs, cadrage). Lot de 20 photos.", prix: 120, qte: 1, unite: 'lot de 20' },
+  { id: 'montage', type: 'ponctuel', nom: 'Montage vidéo', description: "Une journée de montage : choix des meilleures prises, montage, musique, textes, et export aux formats de vos écrans et réseaux.", prix: 450, qte: 1, unite: 'journée' },
   { id: 'ecrans', type: 'ponctuel', nom: 'Contenus pour vos écrans en boutique', description: "Montage d'une boucle photo et vidéo au format de vos écrans (horizontal ou vertical), livrée prête à diffuser.", prix: 290, qte: 1, unite: 'boucle' },
-  { id: 'seo', v: 2, type: 'ponctuel', nom: 'Mise en place du référencement Google', description: "Fiche Google Maps complète (catégories, horaires, photos, produits, avis) + site optimisé pour Google (mots-clés locaux, pages, annuaires).", prix: 580, qte: 1, unite: 'forfait' },
+  { id: 'seo', v: 3, garde: true, type: 'ponctuel', nom: 'Pack Google My Business', description: "Création et réglage complet de votre fiche Google (Maps) : catégories, horaires, photos, produits, lien vers le site, et mots-clés locaux sur le site.", prix: 580, qte: 1, unite: 'forfait' },
+  { id: 'site', type: 'ponctuel', nom: 'Création de site internet', description: "Site vitrine responsive (5 à 8 pages), design sur mesure, formulaire de contact, optimisé mobile.", prix: 1490, qte: 1, unite: 'site' },
+  { id: 'suiviseo', v: 3, garde: true, type: 'mensuel', nom: 'Optimisation de la page Google My Business', description: "Chaque mois : publications et photos sur votre fiche, réponses aux avis, suivi de votre position sur Google.", prix: 99, qte: 1, unite: 'mois' },
+  { id: 'hebergement', v: 2, type: 'mensuel', nom: 'Hébergement du site', description: "Hébergement rapide et sécurisé, sauvegardes et certificat de sécurité (HTTPS).", prix: 15, qte: 1, unite: 'mois' },
+  { id: 'domaine', type: 'ponctuel', nom: 'Nom de domaine', description: "Réservation de votre adresse internet (par exemple laboulangerie-marseille.fr) pour un an, renouvelable.", prix: 20, qte: 1, unite: 'an' },
   { id: 'miseenligne', type: 'ponctuel', nom: 'Mise en ligne et configuration', description: "Nom de domaine, hébergement, adresses email, statistiques, sécurité (HTTPS).", prix: 150, qte: 1, unite: 'forfait' },
-  { id: 'social', type: 'mensuel', nom: 'Gestion Instagram / Facebook', description: "Planning éditorial, 3 publications par semaine, stories, modération des commentaires.", prix: 390, qte: 1, unite: 'mois' },
-  { id: 'contenus', type: 'mensuel', nom: 'Création de contenus réguliers', description: "Photos et visuels produits chaque mois, déclinés pour le site et les réseaux.", prix: 290, qte: 1, unite: 'mois' },
-  { id: 'tiktok', type: 'mensuel', nom: 'Gestion TikTok', description: "Idées, tournage léger et publication de vidéos tendances, adaptées au commerce.", prix: 250, qte: 1, unite: 'mois' },
   { id: 'maintenance', type: 'mensuel', nom: 'Maintenance technique du site', description: "Sauvegardes, mises à jour de sécurité, surveillance de disponibilité.", prix: 49, qte: 1, unite: 'mois' },
-  { id: 'hebergement', type: 'mensuel', nom: 'Hébergement et nom de domaine', description: "Hébergement rapide et sécurisé, nom de domaine et certificat SSL inclus.", prix: 19, qte: 1, unite: 'mois' },
   { id: 'majsite', type: 'mensuel', nom: 'Mises à jour du site', description: "Modifications de contenu : horaires, produits, actualités, photos (jusqu'à 1 h / mois).", prix: 39, qte: 1, unite: 'mois' },
-  { id: 'suiviseo', v: 2, type: 'mensuel', nom: 'Suivi Google mensuel', description: "Publications sur votre fiche Google, réponses aux avis, suivi de votre position sur Google et ajustements chaque mois.", prix: 99, qte: 1, unite: 'mois' },
-  { id: 'reporting', type: 'mensuel', nom: 'Suivi et reporting mensuel', description: "Tableau de bord clair : visites, appels, abonnés, avis, et recommandations du mois.", prix: 49, qte: 1, unite: 'mois' },
+  { id: 'planmkt', v: 2, garde: true, type: 'ponctuel', nom: 'Plan marketing médias et réseaux sociaux', description: "Vos clients, vos concurrents, vos objectifs, et le calendrier des actions sur les médias et les réseaux sur 12 mois.", prix: 390, qte: 1, unite: 'forfait' },
+  { id: 'blog', v: 2, garde: true, type: 'mensuel', nom: 'Articles de blog optimisés SEO (géolocalisés)', description: "2 articles par mois sur votre quartier et vos produits, écrits pour être trouvé sur Google près de chez vous.", prix: 160, qte: 1, unite: 'mois' },
+  { id: 'contenus', v: 2, garde: true, type: 'mensuel', nom: 'Création de contenus et diffusion des posts', description: "Photos, visuels et textes créés chaque mois, puis publiés sur vos réseaux.", prix: 290, qte: 1, unite: 'mois' },
+  { id: 'social', type: 'mensuel', nom: 'Gestion Instagram / Facebook', description: "Planning éditorial, 3 publications par semaine, stories, modération des commentaires.", prix: 390, qte: 1, unite: 'mois' },
   { id: 'reels', type: 'mensuel', nom: 'Vidéos courtes pour les réseaux sociaux', description: "2 vidéos courtes par mois (Reels, Stories), tournées et montées pour Instagram et Facebook.", prix: 190, qte: 1, unite: 'mois' },
-  { id: 'planmkt', type: 'ponctuel', nom: 'Plan marketing', description: "Vos clients, vos concurrents, vos objectifs, et le calendrier des actions sur 12 mois.", prix: 390, qte: 1, unite: 'forfait' },
-  { id: 'blog', type: 'mensuel', nom: 'Articles de blog SEO géolocalisés', description: "2 articles par mois sur votre quartier et vos produits, écrits pour être trouvés sur Google.", prix: 160, qte: 1, unite: 'mois' },
-  { id: 'saison', type: 'mensuel', nom: 'Campagnes de communication saisonnières', description: "Une campagne par temps fort (fêtes, galette, rentrée, été) : visuels, publications, affichage en boutique. Lissé au mois.", prix: 90, qte: 1, unite: 'mois' },
-  { id: 'formulaire', type: 'ponctuel', nom: 'Formulaires de collecte de contacts', description: "Formulaire sur le site et en boutique (QR code) pour recueillir emails et numéros, avec consentement (RGPD).", prix: 190, qte: 1, unite: 'forfait' },
+  { id: 'tiktok', type: 'mensuel', nom: 'Gestion TikTok', description: "Idées, tournage léger et publication de vidéos tendances, adaptées au commerce.", prix: 250, qte: 1, unite: 'mois' },
+  { id: 'reporting', type: 'mensuel', nom: 'Suivi et reporting mensuel', description: "Tableau de bord clair : visites, appels, abonnés, avis, et recommandations du mois.", prix: 49, qte: 1, unite: 'mois' },
+  { id: 'formulaire', v: 2, garde: true, type: 'ponctuel', nom: 'Base clients et formulaire de collecte', description: "Formulaire sur le site et en boutique (QR code) pour constituer votre fichier clients, avec leur accord (RGPD).", prix: 190, qte: 1, unite: 'forfait' },
+  { id: 'sms', v: 2, garde: true, type: 'mensuel', nom: 'Envoi de SMS aux clients', description: "Jusqu'à 2 campagnes par mois, envoyées uniquement aux clients qui ont donné leur accord. Coût d'envoi des SMS selon le volume.", prix: 59, qte: 1, unite: 'mois' },
   { id: 'fidelite', type: 'ponctuel', nom: 'Programme de fidélité avec QR code', description: "Carte de fidélité digitale : le client scanne un QR code en caisse et cumule ses avantages.", prix: 290, qte: 1, unite: 'forfait' },
-  { id: 'sms', type: 'mensuel', nom: 'Campagnes SMS avec consentement', description: "Jusqu'à 2 campagnes par mois, envoyées uniquement aux clients qui ont donné leur accord. Coût d'envoi des SMS selon le volume.", prix: 59, qte: 1, unite: 'mois' },
-  { id: 'qravis', type: 'ponctuel', nom: 'QR code pour les avis Google', description: "Présentoir de comptoir avec un QR code qui ouvre directement la page d'avis Google.", prix: 49, qte: 1, unite: 'forfait' },
+  { id: 'qravis', v: 2, garde: true, type: 'ponctuel', nom: 'Avis Google avec étoiles (QR code)', description: "Présentoir de comptoir : le client scanne le QR code et laisse directement un avis avec étoiles sur Google.", prix: 49, qte: 1, unite: 'forfait' },
+  { id: 'saison', v: 2, garde: true, type: 'mensuel', nom: 'Événements : Noël, anniversaires, spécial Ramadan', description: "Une opération par temps fort : visuels, publications, SMS et affichage en boutique. Lissé au mois.", prix: 90, qte: 1, unite: 'mois' },
 ].map(p => ({ ...p, selected: false, offre: OFFRE_PAR_DEFAUT[p.id] || 'base' }));
 
 /* ============================ Formules ============================
@@ -104,7 +105,7 @@ const CATALOGUE = [
    Réglages possibles par ligne : prix, qte, type (sinon : valeurs du catalogue).
    La remise affichée = prix à la carte − prix final : elle est toujours réelle. */
 const IDS_SIGNATURE = ['tournage', 'retouche', 'montage', 'ecrans', 'site', 'miseenligne'];
-const IDS_PREMIUM = [...IDS_SIGNATURE, 'seo', 'suiviseo', 'hebergement', 'maintenance', 'social', 'contenus', 'reels'];
+const IDS_PREMIUM = [...IDS_SIGNATURE, 'seo', 'suiviseo', 'hebergement', 'domaine', 'maintenance', 'social', 'contenus', 'reels'];
 const IDS_SERENITE = [...IDS_PREMIUM, 'planmkt', 'blog', 'saison', 'formulaire', 'fidelite', 'sms', 'qravis', 'reporting'];
 const toItems = (ids) => Object.fromEntries(ids.map(id => [id, {}]));
 const PACKS = [
@@ -118,7 +119,7 @@ const PACKS = [
     items: toItems(IDS_PREMIUM), remises: { ponctuel: { mode: '%', valeur: 10 }, mensuel: { mode: '%', valeur: 10 } } },
   { id: 'serenite', v: 1, nom: 'Pack Sérénité', sous: 'Communication complète',
     promesse: 'Toute votre communication prise en charge, pour attirer et faire revenir vos clients.',
-    points: ['Tout le Pack Premium', 'Plan marketing et campagnes saisonnières', 'Articles de blog pour Google', 'Programme de fidélité avec QR code', 'SMS clients (avec accord) et avis Google', 'Suivi et reporting chaque mois'],
+    points: ['Tout le Pack Premium', 'Plan marketing et événements (Noël, Ramadan…)', 'Articles de blog pour Google', 'Programme de fidélité avec QR code', 'SMS clients (avec accord) et avis Google', 'Suivi et reporting chaque mois'],
     items: toItems(IDS_SERENITE), remises: { ponctuel: { mode: '%', valeur: 15 }, mensuel: { mode: '%', valeur: 15 } } },
 ];
 
@@ -210,14 +211,18 @@ const load = () => {
     if (!s) return DEFAULTS;
     // fusion prudente avec les valeurs par défaut (nouvelles prestations, nouveaux champs)
     const valide = (o) => OFFRE_IDS.includes(o);
+    const blocsV4 = (s.offres || []).some(o => o.v === 4);
     const stocke = (id) => (s.prestations || []).find(x => x.id === id) || {};
     const prestations = CATALOGUE.map(p => {
       const st = stocke(p.id);
       // prestation redéfinie (v différente) : on reprend la nouvelle version, en gardant la sélection
-      const base = p.v && st.v !== p.v ? { selected: !!st.selected, offre: st.offre } : st;
+      // nouvelle version : textes du catalogue repris ; prix gardés si la prestation est seulement renommée (garde)
+      const base = p.v && st.v !== p.v ? { selected: !!st.selected, offre: st.offre,
+        ...(p.garde && st.prix !== undefined ? { prix: st.prix, qte: st.qte, unite: st.unite } : {}) } : st;
       // l'ancienne « fiche Google » (gbp) est fusionnée dans « Mise en place du référencement Google »
       if (p.id === 'seo' && stocke('gbp').selected) base.selected = true;
-      const offre = remapOffre(base.offre);
+      // blocs réorganisés (v4) : chaque prestation du catalogue reprend son bloc par défaut une fois
+      const offre = blocsV4 ? remapOffre(base.offre) : p.offre;
       return { ...p, ...base, offre: valide(offre) ? offre : p.offre };
     });
     // seules les prestations créées à la main sont gardées en plus du catalogue
@@ -588,24 +593,38 @@ function Proposal({ s, c, numero, onClose, toast }) {
         {/* Prestations incluses */}
         <section className="mt-6">
           <h3 className="font-display text-xl font-semibold">Ce qui est inclus</h3>
-          <div className="mt-3 grid gap-x-8 gap-y-4 sm:grid-cols-2">
-            {c.offres.map(o => (
-              <div key={o.id} className="avoid-break">
-                <p className="border-b border-gray-200 pb-1 text-[11px] font-bold uppercase tracking-wider text-gray-500">{o.nom}</p>
-                <ul className="mt-1.5 space-y-1.5">
-                  {o.items.map(p => (
-                    <li key={p.id} className="flex gap-2">
-                      <Check className="h-4 w-4" />
-                      <div className="min-w-0 flex-1">
-                        <p className="font-medium leading-snug">{p.nom}{qteLabel(p) && <span className="font-normal text-gray-500"> · {qteLabel(p)}</span>}</p>
-                        <p className="desc text-xs leading-snug text-gray-500">{p.description}</p>
-                      </div>
-                      <span className="tabular shrink-0 text-right text-xs text-gray-600">{eur(c.line(p))} HT{p.type === 'mensuel' && <span className="block">/ mois</span>}</span>
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            ))}
+          <div className="mt-3 grid gap-4 sm:grid-cols-2">
+            {c.offres.map(o => {
+              const option = o.id === 'fidel';
+              const n = OFFRE_IDS.indexOf(o.id) + 1;
+              return (
+                <div key={o.id} className={'avoid-break overflow-hidden rounded-2xl ' + (option ? 'border-2 border-dashed border-gray-300' : 'border border-gray-200')}>
+                  <div className={'flex items-start gap-3 px-4 py-3 ' + (option ? 'bg-amber-50/60' : 'bg-gray-50')}>
+                    <span className={'grid h-7 w-7 shrink-0 place-items-center rounded-full text-xs font-bold text-white ' + (option ? 'bg-amber-600' : 'bg-accent')}>{option ? '+' : n}</span>
+                    <div className="min-w-0 flex-1">
+                      <p className="font-display text-[17px] font-semibold leading-tight">{o.nom}</p>
+                      <p className="text-xs text-gray-500">{o.tag}</p>
+                    </div>
+                    <p className="tabular shrink-0 text-right text-xs font-semibold leading-tight">
+                      {o.bP > 0 && <span className="block">{eur(o.bP)} HT</span>}
+                      {o.bM > 0 && <span className="block">{o.bP > 0 ? '+ ' : ''}{eur(o.bM)} HT / mois</span>}
+                    </p>
+                  </div>
+                  <ul className="space-y-1.5 px-4 py-3">
+                    {o.items.map(p => (
+                      <li key={p.id} className="flex gap-2">
+                        <Check className="h-4 w-4" />
+                        <div className="min-w-0 flex-1">
+                          <p className="font-medium leading-snug">{p.nom}{qteLabel(p) && <span className="font-normal text-gray-500"> · {qteLabel(p)}</span>}</p>
+                          <p className="desc text-xs leading-snug text-gray-500">{p.description}</p>
+                        </div>
+                        <span className="tabular shrink-0 text-right text-xs text-gray-600">{eur(c.line(p))} HT{p.type === 'mensuel' && <span className="block">/ mois</span>}</span>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              );
+            })}
           </div>
         </section>
 
