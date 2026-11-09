@@ -119,6 +119,8 @@ const CATALOGUE = [
 ].map(p => ({ ...p, selected: false, offre: OFFRE_PAR_DEFAUT[p.id] || 'base' }));
 
 /* ============================ Formules ============================
+   Les formules s'emboîtent : Premium = Photo-Vidéo + Site Web + ses ajouts ; Croissance = Premium + … ; Sérénité = Croissance + …
+   Chaque pack ne stocke que ses ajouts (et { retire: true } pour enlever une prestation héritée).
    Un pack = une liste d'identifiants du catalogue (jamais de doublon : c'est un objet {id: réglages}).
    Réglages possibles par ligne : prix, qte, type (sinon : valeurs du catalogue).
    La remise affichée = prix à la carte − prix final : elle est toujours réelle. */
@@ -132,23 +134,23 @@ const PACKS = [
   { id: 'photo', blocs: ['base'], v: 1, groupe: 'unite', nom: 'Pack Photo-Vidéo', sous: 'Uniquement la création visuelle',
     promesse: 'Une journée de tournage dans votre boutique et le montage de vos vidéos, prêtes pour vos écrans et vos réseaux.',
     points: ['Tournage photo et vidéo sur place (1 journée)', 'Montage vidéo (1 journée)', 'Vidéos prêtes pour vos écrans en boutique', 'Photos et vidéos pour vos réseaux'],
-    items: toItems(['tournage', 'montage']), remises: remiseDe(0) },
+    items: toItems(['tournage', 'montage']), herite: true, remises: remiseDe(0) },
   { id: 'siteweb', blocs: ['web'], v: 1, groupe: 'unite', nom: 'Pack Site Web', sous: 'Uniquement le site internet',
     promesse: 'Votre site à votre image, en ligne sur votre propre adresse.',
     points: ['Création du site sur mesure, adapté au téléphone', 'Nom de domaine (votre adresse internet)', 'Mise en ligne et configuration', 'Hébergement du site'],
-    items: toItems(['site', 'domaine', 'miseenligne', 'hebergement']), remises: remiseDe(0) },
+    items: toItems(['site', 'domaine', 'miseenligne', 'hebergement']), herite: true, remises: remiseDe(0) },
   { id: 'signature', blocs: ['base', 'web'], v: 2, nom: 'Pack Premium', sous: 'Photo-vidéo + visibilité web',
     promesse: 'De belles images de votre boutique et un commerce bien visible sur Google.',
     points: ['Tournage photo et vidéo dans votre boutique', 'Montage vidéo de vos images', 'Fiche Google My Business optimisée', 'Votre site internet, hébergé, avec nom de domaine'],
-    items: toItems(IDS_VISUEL_WEB), remises: remiseDe(10) },
+    items: toItems(['seo', 'suiviseo']), herite: true, remises: remiseDe(10) },
   { id: 'premium', blocs: ['base', 'web', 'social'], v: 2, nom: 'Pack Croissance', sous: '+ communication', recommande: true,
     promesse: 'Tout le Premium, et nous communiquons pour vous faire gagner de nouveaux clients.',
     points: ['Tout le Pack Premium', 'Plan marketing médias et réseaux sociaux', 'Contenus créés et publiés pour vous', 'Articles de blog pour Google', 'Vidéos courtes pour les réseaux'],
-    items: toItems(IDS_CROISSANCE), remises: remiseDe(15) },
+    items: toItems(['planmkt', 'blog', 'contenus', 'social', 'reels']), herite: true, remises: remiseDe(15) },
   { id: 'serenite', blocs: ['base', 'web', 'social', 'fidel'], v: 2, nom: 'Pack Sérénité', sous: '+ fidélisation',
     promesse: 'Tout est géré : attirer de nouveaux clients et faire revenir les fidèles.',
     points: ['Tout le Pack Croissance', 'Base clients et programme de fidélité (QR code)', 'Envoi de SMS aux clients', 'Avis Google avec étoiles', 'Événements : Noël, anniversaires, Ramadan', 'Suivi et reporting chaque mois'],
-    items: toItems(IDS_SERENITE), remises: remiseDe(20) },
+    items: toItems(['sms', 'fidelite', 'qravis', 'saison', 'reporting']), herite: true, remises: remiseDe(20) },
 ];
 
 // Formules affichées dans le devis « à la carte » : elles regroupent les packs choisis, avec une remise.
@@ -280,9 +282,25 @@ const load = () => {
       .filter((x, i, arr) => arr.findIndex(y => y.id === x.id) === i)
       .map(x => ({ ...x, offre: valide(remapOffre(x.offre)) ? remapOffre(x.offre) : 'base' }));
     // formules : réglages enregistrés gardés s'ils datent de la version actuelle du pack
-    const packs = PACKS.map(d => {
+    let packs = PACKS.map(d => {
       const st = (s.packs || []).find(x => x.id === d.id && x.v === d.v);
-      return st ? { ...d, ...st, remises: { ...d.remises, ...st.remises } } : d;
+      return st ? { ...d, ...st, herite: !!st.herite, remises: { ...d.remises, ...st.remises } } : d;
+    });
+    // anciennes formules (listes complètes) : on ne garde que les ajouts, le reste vient des formules parentes
+    const defauts = { packs: PACKS };
+    packs = packs.map(pk => {
+      if (pk.herite) return pk;
+      const parentDef = itemsHerites(defauts, PACKS.find(x => x.id === pk.id));
+      const vide = (o) => !o || !Object.keys(o).length;
+      const items = {};
+      // une ligne « au prix du catalogue » reste au prix du catalogue, même si un pack parent a un prix modifié
+      const modifieAilleurs = (id) => packs.some(x => x.id !== pk.id && !vide((x.items || {})[id]) && !(x.items[id] || {}).retire);
+      Object.entries(pk.items || {}).forEach(([id, o]) => {
+        if (!(parentDef[id] && vide(o))) items[id] = o;
+        else if (modifieAilleurs(id)) items[id] = { prix: '', qte: '', type: '' };
+      });
+      Object.keys(parentDef).forEach(id => { if (!(id in (pk.items || {}))) items[id] = { retire: true }; });
+      return { ...pk, items, herite: true };
     });
     // noms d'offres personnalisés gardés seulement s'ils datent de la version actuelle des offres
     const offres = OFFRES.map(o => ({ ...o, ...((s.offres || []).find(x => x.id === o.id && x.v === o.v) || {}) }));
@@ -342,15 +360,32 @@ const qteLabel = (p) => { const t = qteTexte(p); return /^\d+$/.test(t) ? '× ' 
 
 /* ============================ Calculs ============================ */
 // Lignes d'une formule : le catalogue, avec les réglages propres au pack. catPrix = prix à la carte.
-const packLines = (s, pack) => !pack ? [] : s.prestations
-  .filter(p => pack.items[p.id])
+const PARENTS = { signature: ['photo', 'siteweb'], premium: ['signature'], serenite: ['premium'] };
+const fusion = (base, propres) => {
+  const res = { ...base };
+  Object.entries(propres || {}).forEach(([id, o]) => { if (o && o.retire) delete res[id]; else res[id] = { ...(res[id] || {}), ...o }; });
+  return res;
+};
+// prestations héritées des formules parentes
+function itemsHerites(s, pk, vus = new Set()) {
+  if (!pk || !pk.id || vus.has(pk.id)) return {};
+  vus.add(pk.id);
+  return (PARENTS[pk.id] || []).reduce((acc, pid) => {
+    const par = (s.packs || []).find(x => x.id === pid);
+    return par ? { ...acc, ...fusion(itemsHerites(s, par, vus), par.items) } : acc;
+  }, {});
+}
+const itemsEffectifs = (s, pk) => (pk ? fusion(itemsHerites(s, pk), pk.items) : {});
+
+const packLines = (s, pack) => !pack ? [] : (() => { const eff = itemsEffectifs(s, pack); return s.prestations
+  .filter(p => eff[p.id])
   .map(p => {
-    const o = pack.items[p.id];
+    const o = eff[p.id];
     return { ...p, selected: true, catPrix: num(p.prix),
       prix: o.prix !== undefined && o.prix !== '' ? o.prix : p.prix,
       qte: o.qte !== undefined && o.qte !== '' ? o.qte : p.qte,
       type: o.type || p.type };
-  });
+  }); })();
 
 function compute(s) {
   const pack = (s.packs || []).find(x => x.id === s.pack);
@@ -432,7 +467,8 @@ function comparer(s, pack, garder) {
   const carte = calc(s, carteSel, s.remises);
   const lignes = packLines(s, pack);
   const enPlus = lignes.filter(p => !carteSel.some(x => x.id === p.id));
-  const horsPack = carteSel.filter(p => !pack.items[p.id]);
+  const effP = itemsEffectifs(s, pack);
+  const horsPack = carteSel.filter(p => !effP[p.id]);
   const pk = calc(s, [...lignes, ...(garder ? horsPack.map(p => ({ ...p, catPrix: num(p.prix) })) : [])], pack.remises);
   return { carte, pk, enPlus, horsPack };
 }
@@ -1165,6 +1201,8 @@ function PackCard({ pk, r, actif, ouvert, mois, onChoisir, onPerso }) {
 
 function PackEditor({ s, pk, r, actif, remiseInput, onPack, onItem, onSave, onReset, onChoisir, onPrio }) {
   const [ajout, setAjout] = useState(false), [tout, setTout] = useState(false);
+  const eff = itemsEffectifs(s, pk), herite = itemsHerites(s, pk);
+  const parents = (PARENTS[pk.id] || []).map(id => (s.packs.find(x => x.id === id) || {}).nom).filter(Boolean);
   const fld = (k, l, area) => (
     <Field label={l}>{area
       ? <textarea rows={4} className={inputCls + ' text-sm'} value={(pk[k] || []).join('\n')} onChange={e => onPack({ [k]: e.target.value.split('\n') })} />
@@ -1184,16 +1222,17 @@ function PackEditor({ s, pk, r, actif, remiseInput, onPack, onItem, onSave, onRe
       </div>
 
       <p className="mt-6 text-xs font-medium uppercase tracking-wide text-gray-500">Prestations du pack</p>
+      {parents.length > 0 && <p className="mt-1 text-xs text-gray-500">Ce pack reprend automatiquement {parents.join(' + ')} : ce que vous y changez se répercute ici.</p>}
       <div className="mt-2 space-y-5">
         {(s.offres || OFFRES).map(o => {
-          const items = s.prestations.filter(p => (p.offre || 'base') === o.id && pk.items[p.id]);
+          const items = s.prestations.filter(p => (p.offre || 'base') === o.id && eff[p.id]);
           if (!items.length) return null;
           return (
             <div key={o.id}>
               <p className="border-b border-gray-100 pb-1 text-sm font-semibold">{o.nom}</p>
               <div className="divide-y divide-gray-100">
                 {items.map(p => {
-                  const it = pk.items[p.id];
+                  const it = eff[p.id];
                   const ligne = it ? packLines(s, { items: { [p.id]: it } })[0] : null;
                   return (
                     <div key={p.id} className={'flex flex-wrap items-center gap-x-3 gap-y-2 py-2.5 ' + ''}>
@@ -1202,7 +1241,7 @@ function PackEditor({ s, pk, r, actif, remiseInput, onPack, onItem, onSave, onRe
                         {it && <svg className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor"><path fillRule="evenodd" d="M16.7 5.3a1 1 0 010 1.4l-7.5 7.5a1 1 0 01-1.4 0l-3.5-3.5a1 1 0 111.4-1.4l2.8 2.8 6.8-6.8a1 1 0 011.4 0z" clipRule="evenodd"/></svg>}
                       </button>
                       <div className="min-w-[180px] flex-1">
-                        <p className="text-sm font-medium leading-snug">{p.nom}</p>
+                        <p className="text-sm font-medium leading-snug">{p.nom}{herite[p.id] && <span className="ml-2 rounded bg-indigo-50 px-1.5 py-px align-middle text-[10px] font-semibold text-indigo-700">inclus via {parents.join(' + ')}</span>}</p>
                         <p className="tabular text-xs text-gray-500">À la carte : {eur(num(p.prix))} HT{p.unite ? ' / ' + p.unite : ''}</p>
                         <ChoixPriorite value={prio(p)} onChange={v => onPrio(p.id, v)} />
                       </div>
@@ -1227,13 +1266,13 @@ function PackEditor({ s, pk, r, actif, remiseInput, onPack, onItem, onSave, onRe
             </div>
           );
         })}
-        {!Object.keys(pk.items).length && <p className="text-sm text-gray-500">Aucune prestation : ajoutez-en ci-dessous.</p>}
+        {!Object.keys(eff).length && <p className="text-sm text-gray-500">Aucune prestation : ajoutez-en ci-dessous.</p>}
       </div>
 
       {/* Ajouter une prestation : d'abord celles du même domaine, le reste du catalogue sur demande */}
       {(() => {
-        const domaines = pk.blocs || [...new Set(s.prestations.filter(p => pk.items[p.id]).map(p => p.offre || 'base'))];
-        const dispo = s.prestations.filter(p => !pk.items[p.id] && (tout || domaines.includes(p.offre || 'base')));
+        const domaines = pk.blocs || [...new Set(s.prestations.filter(p => eff[p.id]).map(p => p.offre || 'base'))];
+        const dispo = s.prestations.filter(p => !eff[p.id] && (tout || domaines.includes(p.offre || 'base')));
         return (
           <div className="mt-4">
             {!ajout ? (
@@ -1305,8 +1344,9 @@ function Comparaison({ s, onProposer }) {
   const [packId, setPackId] = useState('');
   const [garder, setGarder] = useState(true);
   if (!sel.length) return null;
-  const overlap = (pk) => sel.filter(p => pk.items[p.id]).length;
-  const auto = s.packs.find(pk => sel.every(p => pk.items[p.id])) || [...s.packs].sort((a, b) => overlap(b) - overlap(a))[0];
+  const eff = (pk) => itemsEffectifs(s, pk);
+  const overlap = (pk) => sel.filter(p => eff(pk)[p.id]).length;
+  const auto = s.packs.find(pk => sel.every(p => eff(pk)[p.id])) || [...s.packs].sort((a, b) => overlap(b) - overlap(a))[0];
   const pack = s.packs.find(x => x.id === packId) || auto;
   const { carte, pk, enPlus, horsPack } = comparer(s, pack, garder);
   const dP = pk.ttcP - carte.ttcP, dM = pk.ttcM - carte.ttcM, dT = pk.totalTTC - carte.totalTTC;
@@ -1395,10 +1435,13 @@ function App() {
     return () => { document.removeEventListener('keydown', esc); document.body.style.overflow = ''; };
   }, [perso]);
   const setPack = (id, patch) => set(p => ({ packs: p.packs.map(x => x.id === id ? { ...x, ...(typeof patch === 'function' ? patch(x) : patch) } : x) }));
-  const setPackItem = (id, prestId, val) => setPack(id, x => {
+  const setPackItem = (id, prestId, val) => set(p => {
+    const x = p.packs.find(k => k.id === id);
     const items = { ...x.items };
-    if (val === null) delete items[prestId]; else items[prestId] = val;
-    return { items };
+    const herite = itemsHerites(p, x)[prestId];
+    if (val === null) { if (herite) items[prestId] = { retire: true }; else delete items[prestId]; }
+    else items[prestId] = val;
+    return { packs: p.packs.map(k => k.id === id ? { ...k, items } : k) };
   });
   const allerOffre = () => { setOpen(o => ({ ...o, offre: true })); setTimeout(() => document.getElementById('offre')?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 30); };
   const changerMode = (m) => { set({ mode: m }); allerOffre(); };
