@@ -210,6 +210,7 @@ const DEFAULTS = {
   pack: '',        // formule choisie
   packs: PACKS,
   combos: COMBOS,
+  choisi: {},  // formule ou packs choisis par le client → devis
   exclus: {},  // prestations décochées devant le client dans « Nos packs » (sauf indispensables)
   remises: { ponctuel: { mode: '%', valeur: 0 }, mensuel: { mode: '%', valeur: 0 } },
   tva: 20,
@@ -594,7 +595,7 @@ function TableRemise({ r, tva, dense }) {
 // Carte d'un pack dans la proposition : bandeau de couleur, prix, prestations. Hauteur selon le contenu.
 // Carte d'un pack : on coche ou décoche chaque prestation devant le client, le prix suit.
 // o = le pack avec toutes ses prestations ; r = le même pack après décochage (prix).
-function BlocCard({ o, r, c, large, cocher, exclus, onToggle, prixLigne }) {
+function BlocCard({ o, r, c, large, cocher, exclus, onToggle, prixLigne, pris, onPrendre }) {
   const option = o.id === 'fidel';
   const coul = COULEURS[o.id] || '#1f3a5f';
   const ordre = { essentiel: 0, recommande: 1, option: 2 };
@@ -628,7 +629,13 @@ function BlocCard({ o, r, c, large, cocher, exclus, onToggle, prixLigne }) {
           <ul className={'px-1 ' + liste}>{services.map(ligne)}</ul>
         </div>
       )}
-      {cocher && <p className="flex items-center gap-2 border-t border-gray-100 px-5 py-2.5 text-sm font-medium"><span className="inline-block h-4 w-4 rounded border-2 border-gray-400" />Je choisis ce pack</p>}
+      {cocher && (
+        <button type="button" onClick={onPrendre} aria-pressed={!!pris}
+          className={'flex w-full items-center gap-2 border-t px-5 py-3 text-sm font-semibold transition ' + (pris ? 'text-white' : 'border-gray-100 hover:bg-gray-50')} style={pris ? { background: coul, borderColor: coul } : {}}>
+          <span className={'grid h-5 w-5 place-items-center rounded-md border-2 ' + (pris ? 'border-white bg-white' : 'border-gray-400')} style={pris ? { color: coul } : {}}>{pris && '✓'}</span>
+          {pris ? 'Pack choisi' : 'Je choisis ce pack'}
+        </button>
+      )}
     </div>
   );
 }
@@ -664,7 +671,7 @@ function LigneMois({ p, on, fort, prix, onToggle, lecture, suffixe = '' }) {
   );
 }
 
-function Proposal({ s, c, cTous, numero, onClose, toast, onExclu }) {
+function Proposal({ s, c, cTous, numero, onClose, toast, onExclu, onChoix, onDevis }) {
   const cl = s.client, v = s.vendeur;
   const validite = fmtDate(addDays(today(), num(s.validite)));
   const formule = c.mode === 'formule' && c.pack;
@@ -678,6 +685,10 @@ function Proposal({ s, c, cTous, numero, onClose, toast, onExclu }) {
   const kP = sommeL(c.ponct) ? c.htP / sommeL(c.ponct) : 1, kM = sommeL(c.mens) ? c.htM / sommeL(c.mens) : 1;
   const prixLigne = (p) => c.line(p) * (p.type === 'mensuel' ? kM : kP) * (1 + num(s.tva) / 100);
   const carte = { exclus: formule ? {} : (s.exclus || {}), onToggle: formule ? null : onExclu, prixLigne, c };
+  const ch = s.choisi || {};
+  const choixPack = (id) => onChoix({ formule: null, packs: (ch.packs || []).includes(id) ? ch.packs.filter(x => x !== id) : [...(ch.packs || []), id] });
+  const choixFormule = (id) => onChoix({ formule: ch.formule === id ? null : id, packs: [] });
+  const dv = avecCombos ? devisCalc(s, c) : null;
   const cols = (n) => (n >= 3 ? 'sm:grid-cols-3' : n === 2 ? 'sm:grid-cols-2' : '');
   const text = buildText(s, c, numero);
   const subject = `Votre proposition ${cl.entreprise ? '– ' + cl.entreprise : ''} (${numero})`;
@@ -762,9 +773,9 @@ function Proposal({ s, c, cTous, numero, onClose, toast, onExclu }) {
         <section className="mt-6">
           <h3 className="font-display text-xl font-semibold">{avecCombos ? 'Nos packs' : 'Ce qui est inclus'}</h3>
           <div className={'mt-3 grid items-start gap-4 ' + cols(principaux.length)}>
-            {principaux.map(o => <BlocCard key={o.id} o={o} r={prixBloc(o)} {...carte} cocher={avecCombos} />)}
+            {principaux.map(o => <BlocCard key={o.id} o={o} r={prixBloc(o)} {...carte} cocher={avecCombos} pris={(ch.packs || []).includes(o.id)} onPrendre={() => choixPack(o.id)} />)}
           </div>
-          {option && <div className="mt-4"><BlocCard o={option} r={prixBloc(option)} {...carte} large cocher={avecCombos} /></div>}
+          {option && <div className="mt-4"><BlocCard o={option} r={prixBloc(option)} {...carte} large cocher={avecCombos} pris={(ch.packs || []).includes(option.id)} onPrendre={() => choixPack(option.id)} /></div>}
         </section>
 
         {/* Formules : regrouper les packs à prix réduit */}
@@ -776,7 +787,7 @@ function Proposal({ s, c, cTous, numero, onClose, toast, onExclu }) {
               {kombi.map(k => {
                 const fort = k.recommande;
                 return (
-                  <div key={k.id} className={'relative flex flex-col rounded-3xl p-5 ' + (fort ? 'bg-accent text-white shadow-lg' : 'border-2 border-gray-200 bg-white')}>
+                  <div key={k.id} className={'relative flex flex-col rounded-3xl p-5 ' + (fort ? 'bg-accent text-white shadow-lg' : 'border-2 border-gray-200 bg-white') + (ch.formule === k.id ? ' ring-4 ring-emerald-400' : '')}>
                     {fort && <span className="absolute -top-3 left-5 rounded-full bg-amber-400 px-3 py-1 text-[11px] font-bold uppercase tracking-wide text-ink">Recommandé</span>}
                     <p className={'text-[11px] font-bold uppercase tracking-wider ' + (fort ? 'text-white/70' : 'text-gray-500')}>{k.sous}</p>
                     <p className="flex flex-wrap items-center gap-2 font-display text-2xl font-semibold leading-tight">{k.nom}{num(k.remise) > 0 && <span className="rounded-full bg-emerald-100 px-2 py-0.5 font-sans text-xs font-bold text-emerald-800">− {num(k.remise)} % sur les packs séparés</span>}</p>
@@ -803,7 +814,11 @@ function Proposal({ s, c, cTous, numero, onClose, toast, onExclu }) {
                       )}
                       
                     </div>
-                    <p className="mt-auto flex items-center gap-2 pt-4 text-sm font-medium"><span className="inline-block h-4 w-4 rounded border-2 border-current" />Je choisis cette formule</p>
+                    <button type="button" onClick={() => choixFormule(k.id)} aria-pressed={ch.formule === k.id}
+                      className={'mt-auto flex w-full items-center justify-center gap-2 rounded-xl py-3 text-sm font-semibold transition ' + (ch.formule === k.id ? 'bg-emerald-500 text-white' : fort ? 'mt-4 bg-white text-accent hover:bg-white/90' : 'bg-accent text-white hover:brightness-110')}>
+                      <span className={'grid h-5 w-5 place-items-center rounded-md border-2 ' + (ch.formule === k.id ? 'border-white bg-white text-emerald-600' : 'border-current')}>{ch.formule === k.id && '✓'}</span>
+                      {ch.formule === k.id ? 'Formule choisie' : 'Je choisis cette formule'}
+                    </button>
                   </div>
                 );
               })}
@@ -864,6 +879,184 @@ function Proposal({ s, c, cTous, numero, onClose, toast, onExclu }) {
             {(v.telephone || v.email) && <p className="text-gray-600">{[v.telephone, v.email].filter(Boolean).join(' · ')}</p>}
             {v.siret && <p className="text-gray-500">SIRET {v.siret}</p>}
             <p className="mt-2 text-gray-500">Une question ? Appelez-moi, je vous réponds directement.</p>
+          </div>
+        </section>
+      </article>
+      <div className="no-print h-24" />
+      {dv && (
+        <div className="no-print fixed inset-x-0 bottom-0 z-20 border-t border-gray-200 bg-white/95 px-4 py-3 shadow-[0_-4px_20px_rgba(0,0,0,.08)] backdrop-blur" style={{ paddingBottom: 'calc(.75rem + env(safe-area-inset-bottom))' }}>
+          <div className="mx-auto flex max-w-[860px] flex-wrap items-center gap-3">
+            <div className="min-w-0 flex-1">
+              <p className="truncate text-sm font-semibold">Choix : {dv.titre}</p>
+              <p className="tabular text-xs text-gray-500">{[dv.P.ttc > 0 && eur(dv.P.ttc) + ' TTC une fois', dv.M.ttc > 0 && eur(dv.M.ttc) + ' TTC / mois'].filter(Boolean).join(' · ')}</p>
+            </div>
+            <button onClick={onDevis} className="rounded-xl bg-emerald-600 px-5 py-3 text-sm font-semibold text-white shadow-sm hover:brightness-110">Éditer le devis →</button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* ============================ Devis ============================ */
+// Ce que le client a choisi (une formule, ou un ou plusieurs packs) → lignes, remises, TVA, acompte.
+function devisCalc(s, c) {
+  const ch = s.choisi || {};
+  const k = ch.formule ? combos(s, c).find(x => x.id === ch.formule) : null;
+  const ids = k ? k.blocs.map(o => o.id) : (ch.packs || []);
+  const blocs = c.offres.filter(o => ids.includes(o.id));
+  if (!blocs.length) return null;
+  const t = num(s.tva) / 100;
+  const somme = (arr) => arr.reduce((a, p) => a + c.line(p), 0);
+  const kP = somme(c.ponct) ? c.htP / somme(c.ponct) : 1, kM = somme(c.mens) ? c.htM / somme(c.mens) : 1;
+  const r = k ? Math.min(100, Math.max(0, num(k.remise))) / 100 : 0;
+  const part = (type, kG) => {
+    const groupes = blocs.map(o => ({ ...o, lignes: o.items.filter(p => (p.type === 'mensuel') === (type === 'mensuel')) })).filter(o => o.lignes.length);
+    const brut = groupes.reduce((a, o) => a + somme(o.lignes), 0);
+    const remG = brut * (1 - kG), apres = brut - remG, remF = apres * r, ht = apres - remF;
+    return { groupes, brut, remG, remF, ht, tva: ht * t, ttc: ht * (1 + t) };
+  };
+  const P = part('ponctuel', kP), M = part('mensuel', kM);
+  const acompte = s.acompte.actif ? P.ttc * num(s.acompte.pct) / 100 : 0;
+  const titre = k ? k.nom : blocs.map(o => o.nom).join(' + ');
+  return { k, blocs, r, P, M, acompte, titre, mois: c.mois, totalTTC: P.ttc + M.ttc * (c.mois || 1) };
+}
+
+function Devis({ s, d, numero, onBack, toast }) {
+  const cl = s.client, v = s.vendeur;
+  const date = fmtDate(today()), validite = fmtDate(addDays(today(), num(s.validite)));
+  const texte = [
+    `Bonjour${cl.responsable ? ' ' + cl.responsable.split(' ')[0] : ''},`, '',
+    `Voici votre devis N° ${numero} : ${d.titre}.`,
+    d.P.ttc > 0 ? `• Une seule fois : ${eur(d.P.ttc)} TTC (${eur(d.P.ht)} HT)` : false,
+    d.M.ttc > 0 ? `• Chaque mois : ${eur(d.M.ttc)} TTC (${eur(d.M.ht)} HT)${d.mois ? `, engagement ${d.mois} mois` : ''}` : false,
+    d.acompte > 0 ? `• Acompte à la signature : ${eur(d.acompte)} TTC` : false,
+    `Devis valable jusqu'au ${validite}.`, '',
+    [v.nom, v.societe, v.telephone].filter(Boolean).join(' · '),
+  ].filter(l => l !== false).join('\n');
+  const whatsapp = () => { window.open(`https://wa.me/${waNumber(cl.telephone)}?text=${encodeURIComponent(texte)}`, '_blank'); toast('WhatsApp est ouvert avec le message prérempli. Joignez le PDF du devis puis envoyez.'); };
+  const email = () => { window.location.href = `mailto:${encodeURIComponent(cl.email || '')}?subject=${encodeURIComponent(`Devis ${numero}${cl.entreprise ? ' – ' + cl.entreprise : ''}`)}&body=${encodeURIComponent(texte)}`; toast('Votre messagerie est ouverte. Joignez le PDF du devis puis envoyez.'); };
+
+  const Tableau = ({ part, mensuel }) => (
+    <table className="w-full text-[13px]">
+      <thead>
+        <tr className="border-b-2 border-ink text-left text-[11px] uppercase tracking-wide text-gray-600">
+          <th className="py-2 pr-3 font-semibold">Désignation</th>
+          <th className="w-14 py-2 text-right font-semibold">Qté</th>
+          <th className="w-24 py-2 text-right font-semibold">PU HT</th>
+          <th className="w-28 py-2 text-right font-semibold">Total HT{mensuel ? ' / mois' : ''}</th>
+        </tr>
+      </thead>
+      <tbody className="tabular">
+        {part.groupes.map(o => (
+          <React.Fragment key={o.id}>
+            <tr><td colSpan="4" className="pb-1 pt-3 text-[11px] font-bold uppercase tracking-wider" style={{ color: COULEURS[o.id] }}>{o.nom}</td></tr>
+            {o.lignes.map(p => (
+              <tr key={p.id} className="border-b border-gray-100 align-top">
+                <td className="py-2 pr-3"><span className="font-medium">{p.nom}</span><span className="desc block text-[11px] leading-snug text-gray-500">{p.description}</span></td>
+                <td className="py-2 text-right">{Math.max(1, num(p.qte) || 1)}{p.unite && !['mois', 'forfait', 'site'].includes(p.unite) ? <span className="block text-[10px] text-gray-500">{p.unite}</span> : null}</td>
+                <td className="py-2 text-right">{eur(num(p.prix))}</td>
+                <td className="py-2 text-right">{eur(num(p.prix) * Math.max(1, num(p.qte) || 1))}</td>
+              </tr>
+            ))}
+          </React.Fragment>
+        ))}
+      </tbody>
+    </table>
+  );
+  const Totaux = ({ part, mensuel }) => {
+    const L = (l, val, cls = '') => <div className={'flex justify-between gap-6 py-0.5 ' + cls}><span>{l}</span><span className="tabular">{val}</span></div>;
+    const m = mensuel ? ' / mois' : '';
+    return (
+      <div className="ml-auto mt-3 w-full max-w-[320px] text-[13px]">
+        {(part.remG > 0.005 || part.remF > 0.005) && L('Total HT avant remise', eur(part.brut) + m, 'text-gray-600')}
+        {part.remG > 0.005 && L('Remise commerciale', '− ' + eur(part.remG), 'text-emerald-700')}
+        {part.remF > 0.005 && L(`Remise ${d.k.nom} (− ${num(d.k.remise)} %)`, '− ' + eur(part.remF), 'text-emerald-700')}
+        {L('Total HT', eur(part.ht) + m, 'font-semibold')}
+        {L(`TVA ${s.tva} %`, eur(part.tva) + m, 'text-gray-600')}
+        <div className="mt-1 flex justify-between gap-6 rounded-lg bg-ink px-3 py-2 font-semibold text-white"><span>Total TTC{m}</span><span className="tabular">{eur(part.ttc)}</span></div>
+      </div>
+    );
+  };
+
+  return (
+    <div id="proposal-overlay" className="fixed inset-0 z-50 overflow-y-auto bg-gray-900/40 backdrop-blur-sm sm:p-6">
+      <div className="no-print sticky top-0 z-10 mx-auto flex max-w-[860px] flex-wrap items-center gap-2 bg-white/95 px-4 py-3 shadow-sm backdrop-blur sm:rounded-t-2xl">
+        <button onClick={onBack} className="rounded-xl px-3 py-2 text-sm font-medium text-gray-600 hover:bg-gray-100">← Proposition</button>
+        <div className="ml-auto flex flex-wrap gap-2">
+          <button onClick={() => window.print()} className="rounded-xl bg-ink px-4 py-2 text-sm font-semibold text-white">PDF du devis</button>
+          <button onClick={whatsapp} className="rounded-xl bg-[#25D366] px-4 py-2 text-sm font-semibold text-white">WhatsApp</button>
+          <button onClick={email} className="rounded-xl border border-gray-200 px-4 py-2 text-sm font-medium">Email</button>
+        </div>
+      </div>
+      <article id="proposal" className="mx-auto max-w-[860px] bg-white px-5 py-8 text-[14px] leading-relaxed shadow-xl sm:rounded-b-2xl sm:px-10 sm:py-9">
+        <header className="avoid-break flex flex-wrap items-start justify-between gap-6">
+          <div className="text-[13px] text-gray-600">
+            {s.visuels.logo && <img src={s.visuels.logo} alt="" className="mb-2 h-12 w-auto rounded" />}
+            <p className="text-base font-semibold text-ink">{v.societe || v.nom || 'Votre société'}</p>
+            {v.societe && v.nom && <p>{v.nom}</p>}
+            {(v.telephone || v.email) && <p>{[v.telephone, v.email].filter(Boolean).join(' · ')}</p>}
+            {v.siret && <p>SIRET {v.siret}</p>}
+          </div>
+          <div className="text-right">
+            <p className="font-display text-4xl font-semibold tracking-tight">Devis</p>
+            <p className="tabular text-[13px] text-gray-600">N° {numero}<br />Date : {date}<br />Valable jusqu'au {validite}</p>
+          </div>
+        </header>
+        <section className="avoid-break mt-6 grid gap-4 sm:grid-cols-2">
+          <div className="rounded-2xl bg-gray-50 px-4 py-3 text-[13px]">
+            <p className="text-[11px] font-bold uppercase tracking-wider text-gray-500">Client</p>
+            <p className="font-semibold">{cl.entreprise || '—'}</p>
+            <p className="text-gray-600">{[cl.responsable, cl.adresse, cl.telephone, cl.email].filter(Boolean).join(' · ')}</p>
+          </div>
+          <div className="rounded-2xl border-2 border-accent px-4 py-3 text-[13px]">
+            <p className="text-[11px] font-bold uppercase tracking-wider text-gray-500">Objet</p>
+            <p className="font-display text-lg font-semibold leading-tight">{d.titre}</p>
+            {d.k && <p className="text-gray-600">{d.k.blocs.map(o => o.nom).join(' + ')}</p>}
+          </div>
+        </section>
+
+        {d.P.groupes.length > 0 && (
+          <section className="mt-7">
+            <h2 className="font-display text-xl font-semibold">Réalisations · payées une seule fois</h2>
+            <Tableau part={d.P} />
+            <Totaux part={d.P} />
+            {d.acompte > 0 && (
+              <div className="tabular ml-auto mt-2 w-full max-w-[320px] space-y-0.5 text-[13px] text-gray-700">
+                <div className="flex justify-between gap-6"><span>Acompte à la signature ({s.acompte.pct} %)</span><span>{eur(d.acompte)}</span></div>
+                <div className="flex justify-between gap-6"><span>Solde à la livraison</span><span>{eur(d.P.ttc - d.acompte)}</span></div>
+              </div>
+            )}
+          </section>
+        )}
+
+        {d.M.groupes.length > 0 && (
+          <section className="mt-8">
+            <h2 className="font-display text-xl font-semibold">Services mensuels · choisis par le client</h2>
+            <Tableau part={d.M} mensuel />
+            <Totaux part={d.M} mensuel />
+            <p className="ml-auto mt-2 max-w-[320px] text-right text-[12px] text-gray-500">{d.mois ? `Engagement de ${d.mois} mois, soit ${eur(d.M.ttc * d.mois)} TTC sur la durée.` : 'Sans engagement.'}</p>
+          </section>
+        )}
+
+        <section className="avoid-break mt-8 border-t border-gray-200 pt-5 text-[12.5px] text-gray-700">
+          <p className="font-semibold text-ink">Conditions</p>
+          <ul className="mt-1 space-y-0.5">
+            {s.paiement.split('\n').filter(Boolean).map(l => <li key={l}>• {l}</li>)}
+            <li>• Devis valable jusqu'au {validite}. Prix en euros.</li>
+          </ul>
+        </section>
+
+        <section className="avoid-break mt-6 grid gap-6 sm:grid-cols-2">
+          <div>
+            <p className="text-sm font-semibold">Bon pour accord · le client</p>
+            <p className="text-xs text-gray-500">Date, signature et mention « Bon pour accord »</p>
+            <div className="mt-2 h-24 rounded-xl border border-dashed border-gray-300" />
+          </div>
+          <div>
+            <p className="text-sm font-semibold">{v.societe || v.nom || 'Le prestataire'}</p>
+            <p className="text-xs text-gray-500">Date et signature</p>
+            <div className="mt-2 h-24 rounded-xl border border-dashed border-gray-300" />
           </div>
         </section>
       </article>
@@ -1060,6 +1253,7 @@ function App() {
   const [s, setS] = useState(load);
   const [open, setOpen] = useState({ client: true });
   const [showProposal, setShowProposal] = useState(false);
+  const [showDevis, setShowDevis] = useState(false);
   const [preview, setPreview] = useState(null);
   const [msg, setMsg] = useState('');
   const timer = useRef();
@@ -1465,8 +1659,12 @@ function App() {
         )}
       </div>
 
-      {showProposal && <Proposal s={s} c={c} cTous={cTous} numero={numero} onClose={() => setShowProposal(false)} toast={toast}
-        onExclu={(pid) => set(p => ({ exclus: { ...(p.exclus || {}), [pid]: !(p.exclus || {})[pid] } }))} />}
+      {showProposal && !showDevis && <Proposal s={s} c={c} cTous={cTous} numero={numero} onClose={() => setShowProposal(false)} toast={toast}
+        onExclu={(pid) => set(p => ({ exclus: { ...(p.exclus || {}), [pid]: !(p.exclus || {})[pid] } }))}
+        onChoix={(choisi) => set({ choisi })} onDevis={() => { setShowDevis(true); window.scrollTo(0, 0); }} />}
+      {showProposal && showDevis && (() => { const d = devisCalc(s, c); return d
+        ? <Devis s={s} d={d} numero={numero} toast={toast} onBack={() => setShowDevis(false)} />
+        : (setTimeout(() => setShowDevis(false)), null); })()}
       <Toast msg={msg} />
     </>
   );
