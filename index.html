@@ -72,6 +72,21 @@ const OFFRE_PAR_DEFAUT = {
   planmkt: 'social', contenus: 'social', social: 'social', blog: 'social', reels: 'social', tiktok: 'social', reporting: 'social',
   sms: 'fidel', fidelite: 'fidel', qravis: 'fidel', saison: 'fidel',
 };
+// Priorité affichée au client sur les formules : indispensable (verrouillé), recommandé, au choix.
+const PRIORITES = [
+  { v: 'essentiel', label: 'Indispensable' },
+  { v: 'recommande', label: 'Recommandé' },
+  { v: 'option', label: 'Au choix' },
+];
+const PRIO_DEFAUT = {
+  tournage: 'essentiel', montage: 'essentiel', site: 'essentiel', domaine: 'essentiel', hebergement: 'essentiel', miseenligne: 'essentiel',
+  seo: 'recommande', suiviseo: 'recommande', maintenance: 'recommande', planmkt: 'recommande', blog: 'recommande', contenus: 'recommande',
+  social: 'recommande', fidelite: 'recommande', qravis: 'recommande',
+  majsite: 'option', reels: 'option', tiktok: 'option', reporting: 'option', sms: 'option', saison: 'option',
+};
+const prio = (p) => p.priorite || PRIO_DEFAUT[p.id] || 'option';
+const RAISONS = { hebergement: 'sans lui, le site ne s\'affiche pas', domaine: 'l\'adresse de votre site', maintenance: 'sécurité et sauvegardes du site' };
+
 // ancien bloc « Référencement Google » : rattaché à Visibilité web
 const remapOffre = (o) => (o === 'seo' ? 'web' : o);
 
@@ -194,6 +209,7 @@ const DEFAULTS = {
   pack: '',        // formule choisie
   packs: PACKS,
   combos: COMBOS,
+  choix: {},  // abonnements décochés devant le client, par formule
   remises: { ponctuel: { mode: '%', valeur: 0 }, mensuel: { mode: '%', valeur: 0 } },
   tva: 20,
   engagement: 12,
@@ -370,18 +386,27 @@ function calc(s, sel, remises) {
 // Une formule identique à la précédente (pack vide) n'est pas affichée.
 function combos(s, c) {
   const t = 1 + num(s.tva) / 100, vus = new Set();
+  const somme = (arr) => arr.reduce((a, p) => a + c.line(p), 0);
+  // facteurs de la remise globale (une fois / par mois)
+  const kP = somme(c.ponct) ? c.htP / somme(c.ponct) : 1, kM = somme(c.mens) ? c.htM / somme(c.mens) : 1;
+  const ordre = { essentiel: 0, recommande: 1, option: 2 };
   return (s.combos || COMBOS).map(k => {
     const blocs = c.offres.filter(o => k.blocs.includes(o.id));
     const cle = blocs.map(o => o.id).join('+');
     if (blocs.length < 2 || vus.has(cle)) return null;
     vus.add(cle);
     const r = Math.min(100, Math.max(0, num(k.remise))) / 100;
-    // prix des packs après la remise globale, puis remise de la formule
-    const bP = blocs.reduce((a, o) => a + o.htP, 0), bM = blocs.reduce((a, o) => a + o.htM, 0);
-    const htP = bP * (1 - r), htM = bM * (1 - r);
+    const exclu = ((s.choix || {})[k.id]) || {};
+    const inclus = (p) => prio(p) === 'essentiel' || !exclu[p.id];
     const items = blocs.flatMap(o => o.items);
-    return { ...k, blocs, bP, bM, htP, htM, ttcP: htP * t, ttcM: htM * t,
-      unefois: items.filter(p => p.type !== 'mensuel'), mensuel: items.filter(p => p.type === 'mensuel'),
+    const unefois = items.filter(p => p.type !== 'mensuel');
+    const mensTous = items.filter(p => p.type === 'mensuel').sort((a, b) => ordre[prio(a)] - ordre[prio(b)]);
+    const mensuel = mensTous.filter(inclus);
+    // prix après remise globale, puis remise de la formule
+    const bP = somme(unefois) * kP, bM = somme(mensuel) * kM;
+    const htP = bP * (1 - r), htM = bM * (1 - r);
+    const prixMois = (p) => c.line(p) * kM * (1 - r) * t; // TTC / mois de la ligne dans la formule
+    return { ...k, blocs, bP, bM, htP, htM, ttcP: htP * t, ttcM: htM * t, unefois, mensuel, mensTous, inclus, prixMois,
       eco: ((bP - htP) + (bM - htM) * c.moisCalc) * t, totalTTC: (htP + htM * c.moisCalc) * t };
   }).filter(Boolean);
 }
@@ -485,6 +510,12 @@ function PrestationCard({ p, suggested, onChange, onRemove, offres }) {
           <span className="mb-1 block text-[11px] uppercase tracking-wide text-gray-500">Unité</span>
           <input value={p.unite || ''} onChange={e => onChange({ unite: e.target.value })} placeholder="journée…"
             className={inputCls + ' py-2 text-sm'} />
+        </label>
+        <label className="w-36">
+          <span className="mb-1 block text-[11px] uppercase tracking-wide text-gray-500">Priorité</span>
+          <select value={prio(p)} onChange={e => onChange({ priorite: e.target.value })} className={inputCls + ' py-2 text-sm'}>
+            {PRIORITES.map(x => <option key={x.v} value={x.v}>{x.label}</option>)}
+          </select>
         </label>
         <label className="min-w-[150px]">
           <span className="mb-1 block text-[11px] uppercase tracking-wide text-gray-500">Dans l'offre</span>
@@ -593,7 +624,37 @@ function BlocCard({ o, c, large, cocher }) {
   );
 }
 
-function Proposal({ s, c, numero, onClose, toast }) {
+// Une ligne d'abonnement dans une formule : case à cocher, priorité, prix par mois.
+const BADGE = {
+  essentiel: ['Indispensable', 'bg-rose-100 text-rose-800'],
+  recommande: ['Recommandé', 'bg-emerald-100 text-emerald-800'],
+  option: ['Au choix', 'bg-gray-100 text-gray-600'],
+};
+function LigneMois({ p, on, fort, prix, onToggle }) {
+  const pr = prio(p), fixe = pr === 'essentiel';
+  return (
+    <li className={on ? '' : 'no-print'}>
+      <button type="button" onClick={fixe ? undefined : onToggle} aria-pressed={on} disabled={fixe}
+        className={'flex w-full items-start gap-2 rounded-xl px-2 py-1.5 text-left transition ' + (fixe ? 'cursor-default ' : (fort ? 'hover:bg-white/10 ' : 'hover:bg-gray-50 ')) + (on ? '' : 'opacity-50')}>
+        <span className={'mt-0.5 grid h-[18px] w-[18px] shrink-0 place-items-center rounded-md border-2 ' + (on ? (fort ? 'border-white bg-white text-accent' : 'border-accent bg-accent text-white') : (fort ? 'border-white/60' : 'border-gray-300'))}>
+          {on && (fixe
+            ? <svg className="h-3 w-3" viewBox="0 0 20 20" fill="currentColor"><path fillRule="evenodd" d="M10 2a4 4 0 00-4 4v2H5a2 2 0 00-2 2v6a2 2 0 002 2h10a2 2 0 002-2v-6a2 2 0 00-2-2h-1V6a4 4 0 00-4-4zm2 6V6a2 2 0 10-4 0v2h4z" clipRule="evenodd"/></svg>
+            : <svg className="h-3 w-3" viewBox="0 0 20 20" fill="currentColor"><path fillRule="evenodd" d="M16.7 5.3a1 1 0 010 1.4l-7.5 7.5a1 1 0 01-1.4 0l-3.5-3.5a1 1 0 111.4-1.4l2.8 2.8 6.8-6.8a1 1 0 011.4 0z" clipRule="evenodd"/></svg>)}
+        </span>
+        <span className="min-w-0 flex-1">
+          <span className="block text-[13px] font-medium leading-snug">{p.court || p.nom}</span>
+          <span className="mt-0.5 flex flex-wrap items-center gap-1.5">
+            <span className={'rounded-full px-1.5 py-px text-[10px] font-bold uppercase tracking-wide ' + BADGE[pr][1]}>{BADGE[pr][0]}</span>
+            {RAISONS[p.id] && <span className={'text-[11px] ' + (fort ? 'text-white/60' : 'text-gray-500')}>{RAISONS[p.id]}</span>}
+          </span>
+        </span>
+        <span className={'tabular shrink-0 text-[12px] ' + (fort ? 'text-white/80' : 'text-gray-600')}>{eur(prix)}</span>
+      </button>
+    </li>
+  );
+}
+
+function Proposal({ s, c, numero, onClose, toast, onChoix }) {
   const cl = s.client, v = s.vendeur;
   const validite = fmtDate(addDays(today(), num(s.validite)));
   const formule = c.mode === 'formule' && c.pack;
@@ -705,7 +766,7 @@ function Proposal({ s, c, numero, onClose, toast }) {
                     <div className="mt-2 flex flex-wrap gap-1.5">
                       {k.blocs.map(o => <span key={o.id} className="rounded-full px-2.5 py-0.5 text-[11px] font-semibold text-white ring-1 ring-white/30" style={{ background: COULEURS[o.id] }}>{o.nom.replace(/^(Pack|Option)\s+/, '').split(' & ')[0]}</span>)}
                     </div>
-                    <div className="tabular mt-auto pt-5">
+                    <div className="tabular pt-5">
                       {k.ttcP > 0 && (
                         <div>
                           <p className={'text-xs font-semibold uppercase tracking-wide ' + (fort ? 'text-white/70' : 'text-gray-500')}>À la commande, une seule fois</p>
@@ -713,15 +774,19 @@ function Proposal({ s, c, numero, onClose, toast }) {
                           <p className={'mt-1.5 text-[13px] leading-snug ' + (fort ? 'text-white/85' : 'text-gray-600')}>pour : {k.unefois.map(p => p.court || p.nom).join(' · ')}</p>
                         </div>
                       )}
-                      {k.ttcM > 0 && (
+                      {k.mensTous.length > 0 && (
                         <div className={k.ttcP > 0 ? 'mt-4 border-t pt-3 ' + (fort ? 'border-white/20' : 'border-gray-100') : ''}>
                           <p className={'text-xs font-semibold uppercase tracking-wide ' + (fort ? 'text-white/70' : 'text-gray-500')}>{k.ttcP > 0 ? 'Puis chaque mois' : 'Chaque mois'}{c.mois ? ` (${c.mois} mois)` : ''}</p>
                           <p className="font-display text-2xl font-semibold leading-none">{eur(k.ttcM)}<span className={'ml-1 font-sans text-sm font-medium ' + (fort ? 'text-white/70' : 'text-gray-500')}>TTC / mois</span></p>
-                          <p className={'mt-1.5 text-[13px] leading-snug ' + (fort ? 'text-white/85' : 'text-gray-600')}>pour : {k.mensuel.map(p => p.court || p.nom).join(' · ')}</p>
+                          <p className={'mt-1 text-xs ' + (fort ? 'text-white/70' : 'text-gray-500')}>Ce que vous payez chaque mois :</p>
+                          <ul className="mt-1.5 space-y-1">
+                            {k.mensTous.map(p => <LigneMois key={p.id} p={p} on={k.inclus(p)} fort={fort} prix={k.prixMois(p)} onToggle={() => onChoix(k.id, p.id)} />)}
+                          </ul>
                         </div>
                       )}
-                      <p className="mt-4 flex items-center gap-2 text-sm font-medium"><span className="inline-block h-4 w-4 rounded border-2 border-current" />Je choisis cette formule</p>
+                      
                     </div>
+                    <p className="mt-auto flex items-center gap-2 pt-4 text-sm font-medium"><span className="inline-block h-4 w-4 rounded border-2 border-current" />Je choisis cette formule</p>
                   </div>
                 );
               })}
@@ -1382,7 +1447,8 @@ function App() {
         )}
       </div>
 
-      {showProposal && <Proposal s={s} c={c} numero={numero} onClose={() => setShowProposal(false)} toast={toast} />}
+      {showProposal && <Proposal s={s} c={c} numero={numero} onClose={() => setShowProposal(false)} toast={toast}
+        onChoix={(cid, pid) => set(p => ({ choix: { ...(p.choix || {}), [cid]: { ...((p.choix || {})[cid] || {}), [pid]: !(((p.choix || {})[cid] || {})[pid]) } } }))} />}
       <Toast msg={msg} />
     </>
   );
