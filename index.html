@@ -1514,6 +1514,10 @@ function Racine() {
   const mf = hash.match(/^#\/facture\/([\w-]+)/); if (mf) return <PageFacture key={mf[1]} id={mf[1]} />;
   if (hash.startsWith('#/commandes')) return <PageCommandes />;
   if (hash.startsWith('#/factures')) return <PageFactures />;
+  if (hash.startsWith('#/abonnements')) return <PageAbonnements />;
+  if (hash.startsWith('#/depenses')) return <PageDepenses />;
+  if (hash.startsWith('#/stats')) return <PageStats />;
+  if (hash.startsWith('#/menu')) return <PageMenu />;
   return <Dashboard />;
 }
 
@@ -2104,7 +2108,7 @@ function Accueil() {
         x.compteur = Math.max(x.compteur || 1, data.index.compteur || 1);
         if (data.finance) { // finance : on ajoute ce qui manque (par identifiant), on ne remplace rien d'émis
           const loc = lireFinance(), ids = (k) => new Set(loc[k].map(y => y.id));
-          ['commandes', 'factures', 'paiements'].forEach(k => { const deja = ids(k); (data.finance[k] || []).forEach(y => { if (!deja.has(y.id)) loc[k].push(y); }); });
+          ['commandes', 'factures', 'paiements', 'abonnements', 'depenses'].forEach(k => { loc[k] = loc[k] || []; const deja = ids(k); (data.finance[k] || []).forEach(y => { if (!deja.has(y.id)) loc[k].push(y); }); });
           Object.entries(data.finance.compteurs || {}).forEach(([c, n]) => { loc.compteurs[c] = Math.max(loc.compteurs[c] || 0, n); });
           loc.journal = [...(loc.journal || []), { date: new Date().toISOString(), action: 'import de sauvegarde', ref: jourCourt(data.exporte) }];
           ecrireJSON(FK, loc);
@@ -2294,11 +2298,10 @@ function indicateurs(ds, periode) {
 }
 
 // Navigation latérale (ordinateur) et barre du bas (téléphone)
-const NAV = [['#/', 'Tableau de bord', '◧', 'dashboard'], ['#/clients', 'Clients', '☰', 'clients'], ['#/pipeline', 'Pipeline', '⇶', 'pipeline'], ['#/commandes', 'Commandes', '▣', 'commandes'], ['#/factures', 'Factures', '€', 'factures']];
-const NAV_BIENTOT = [['Abonnements', 3], ['Dépenses', 3], ['Statistiques', 3]];
+const NAV = [['#/', 'Tableau de bord', '◧', 'dashboard'], ['#/clients', 'Clients', '☰', 'clients'], ['#/pipeline', 'Pipeline', '⇶', 'pipeline'], ['#/commandes', 'Commandes', '▣', 'commandes'], ['#/factures', 'Factures', '€', 'factures'], ['#/abonnements', 'Abonnements', '↻', 'abonnements'], ['#/depenses', 'Dépenses', '−', 'depenses'], ['#/stats', 'Statistiques', '▤', 'stats']];
 function Shell({ page, children }) {
   const vi = vendeurInfo((lireJSON(IDX) || {}).vendeur || {});
-  const actif = (h) => (NAV.find(n => n[0] === h) || [])[3] === page;
+  const actif = (h) => (h === '#/menu' ? page === 'menu' : (NAV.find(n => n[0] === h) || [])[3] === page);
   return (
     <div id="shell" className="min-h-screen lg:pl-60">
       <aside className="no-print fixed inset-y-0 left-0 z-40 hidden w-60 flex-col border-r border-gray-200 bg-white px-3 py-5 lg:flex">
@@ -2307,14 +2310,10 @@ function Shell({ page, children }) {
         <nav className="mt-6 space-y-1">
           {NAV.map(([h, l, i]) => <a key={h} href={h} className={'flex items-center gap-3 rounded-xl px-3 py-2.5 text-[15px] font-semibold ' + (actif(h) ? 'bg-ink text-white' : 'text-gray-700 hover:bg-gray-100')}><span className="w-5 text-center">{i}</span>{l}</a>)}
         </nav>
-        <p className="mt-6 px-3 text-[11px] font-bold uppercase tracking-wider text-gray-400">Bientôt</p>
-        <div className="mt-1 space-y-0.5">
-          {NAV_BIENTOT.map(([l, ph]) => <p key={l} className="flex items-center justify-between rounded-xl px-3 py-2 text-sm text-gray-400">{l}<span className="rounded-full bg-gray-100 px-2 py-0.5 text-[10px] font-semibold">phase {ph}</span></p>)}
-        </div>
       </aside>
       {children}
       <nav className="no-print fixed inset-x-0 bottom-0 z-40 grid grid-cols-5 border-t border-gray-200 bg-white/95 backdrop-blur lg:hidden" style={{ paddingBottom: 'env(safe-area-inset-bottom)' }}>
-        {NAV.map(([h, l, i]) => <a key={h} href={h} className={'flex flex-col items-center py-2 text-[11px] font-semibold ' + (actif(h) ? 'text-ink' : 'text-gray-400')}><span className="text-lg leading-none">{i}</span>{l}</a>)}
+        {[...NAV.slice(0, 3), NAV[4], ['#/menu', 'Plus', '⋯', 'menu']].map(([h, l, i]) => <a key={h} href={h} className={'flex flex-col items-center py-2 text-[11px] font-semibold ' + (actif(h) ? 'text-ink' : 'text-gray-400')}><span className="text-lg leading-none">{i}</span>{l}</a>)}
       </nav>
     </div>
   );
@@ -2346,6 +2345,7 @@ function Dashboard() {
   const ouvertesF = fin.factures.filter(x => x.type === 'facture' && x.statut !== 'brouillon').map(x => etatFacture(x, fin));
   const resteDu = ouvertesF.reduce((a, e) => a + e.reste, 0), enRetard = ouvertesF.filter(e => e.statut === 'retard');
   const aLivrer = fin.commandes.filter(c => ['en_cours', 'validation'].includes(c.statut));
+  const rec = recurrent(fin, periode), rent = rentabilite(fin, periode);
   const prochLivr = [...aLivrer].sort((a, b) => (a.livraisonPrevue || '').localeCompare(b.livraisonPrevue || ''))[0];
   const lib = PERIODES.find(x => x[0] === periode)[1].toLowerCase();
   return (
@@ -2356,16 +2356,20 @@ function Dashboard() {
           <Periode value={periode} onChange={choisir} />
         </div>
         <section>
+          <ListeAlertes />
+        </section>
+        <section>
           <p className="mb-2 text-xs font-bold uppercase tracking-wider text-gray-500">L'essentiel</p>
           <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
             <Tuile titre="1 · Vendu (CA signé)" val={eur(k.caSigne)} sous={`${k.nbSignes} devis signé(s) ${lib} · ${eur(k.caSigneP)} + ${eur(k.caSigneM)}/mois`} cls="bg-emerald-50 text-emerald-900" href="#/pipeline" />
             <Tuile titre="2 · Encaissé" val={eurC(encaisse)} sous={`paiements reçus ${lib} · facturé ${eurC(caFacture)}`} cls="bg-emerald-50 text-emerald-900" href="#/factures" />
             <Tuile titre="3 · Ce qu'on me doit" val={eurC(resteDu)} sous={enRetard.length ? `dont ${eurC(enRetard.reduce((a, e) => a + e.reste, 0))} en retard (${enRetard.length} facture(s))` : 'factures émises non réglées'} cls={enRetard.length ? 'bg-red-50 text-red-900' : 'bg-amber-50 text-amber-900'} href="#/factures" />
-            <Tuile titre="4 · Abonnements (MRR)" val={eur(k.mrr) + '/mois'} sous={`soit ${eur(k.mrr * 12)} par an · clients gagnés`} cls="bg-sky-50 text-sky-900" />
+            {(fin.abonnements || []).length ? <Tuile titre="4 · Abonnements (MRR)" val={eurC(rec.mrr) + '/mois'} sous={`ARR ${eurC(rec.arr)} · ${rec.actifs} actif(s)${rec.resilies ? ` · ${rec.resilies} résilié(s) ${lib}` : ''}`} cls="bg-sky-50 text-sky-900" href="#/abonnements" />
+              : <Tuile titre="4 · Abonnements (MRR)" val={eur(k.mrr) + '/mois'} sous="estimé d'après les devis signés : créez les abonnements" cls="bg-sky-50 text-sky-900" href="#/abonnements" />}
             <Tuile titre="5 · Encore à signer" val={eur(k.montantAttente)} sous={`${k.enAttente} devis en attente · pondéré ${eur(k.pondere)}`} cls="bg-amber-50 text-amber-900" href="#/pipeline" />
             <Tuile titre="6 · À livrer" val={aLivrer.length} sous={prochLivr ? `prochaine livraison le ${jourCourt(prochLivr.livraisonPrevue)}` : 'aucune commande en cours'} cls="bg-violet-50 text-violet-900" href="#/commandes" />
-            <Tuile titre="7 · Ce que ça coûte" bientot="saisie des dépenses (phase 3)" />
-            <Tuile titre="8 · Rentabilité" bientot="saisie des dépenses (phase 3)" />
+            <Tuile titre="7 · Ce que ça coûte" val={eurC(rent.depenses)} sous={`dépenses ${lib} · dont ${eurC(rent.directes)} affectées aux clients`} href="#/depenses" />
+            <Tuile titre="8 · Rentabilité" val={eurC(rent.resultat)} sous={rent.ca ? `résultat estimé (${Math.round(rent.resultat / rent.ca * 100)} % du facturé) · trésorerie ${eurC(rent.tresorerie)}` : 'facturé − dépenses'} cls={rent.resultat < 0 ? 'bg-red-50 text-red-900' : 'bg-white'} href="#/stats" />
           </div>
         </section>
         <section className="grid gap-3 sm:grid-cols-3">
@@ -2512,7 +2516,7 @@ function Fiche360({ id }) {
             <span className="rounded-full px-3 py-1 text-xs font-bold text-white" style={{ background: et.coul }}>{et.label}</span>
           </div>
           <div className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-4">
-            {[['CA signé', caSigne ? eur(caSigne) : '—'], ['Encaissé', eurC(solde.encaisse)], ['Solde à recevoir', solde.solde ? eurC(solde.solde) + (solde.retard ? ' ⚠' : '') : '—'], ['Abonnements actifs', mrr ? eur(mrr) + '/mois' : '—']].map(([l, v]) => (
+            {[['CA signé', caSigne ? eur(caSigne) : '—'], ['Encaissé', eurC(solde.encaisse)], ['Solde à recevoir', solde.solde ? eurC(solde.solde) + (solde.retard ? ' ⚠' : '') : '—'], ['Abonnements actifs', (() => { const ab = (fin.abonnements || []).filter(a => a.dossierId === id && a.statut === 'actif'); return ab.length ? eurC(ab.reduce((s, a) => s + a.montantM, 0)) + '/mois' : mrr ? eur(mrr) + '/mois (devis)' : '—'; })()]].map(([l, v]) => (
               <div key={l} className="rounded-xl bg-gray-50 px-3 py-2"><p className="text-[11px] font-bold uppercase tracking-wider text-gray-500">{l}</p><p className="tabular font-semibold">{v}</p></div>
             ))}
           </div>
@@ -2585,7 +2589,7 @@ function Fiche360({ id }) {
 const FK = 'crm-v3-finance';
 const cts = (e) => Math.round(num(e) * 100);
 const eurC = (c) => eur((c || 0) / 100);
-const lireFinance = () => ({ v: 1, compteurs: {}, commandes: [], factures: [], paiements: [], journal: [], ...(lireJSON(FK) || {}) });
+const lireFinance = () => ({ v: 1, compteurs: {}, commandes: [], factures: [], paiements: [], journal: [], abonnements: [], depenses: [], ...(lireJSON(FK) || {}) });
 const prochainNumero = (f, type) => {
   const an = new Date().getFullYear(), k = type + '-' + an;
   f.compteurs = { ...(f.compteurs || {}) }; f.compteurs[k] = (f.compteurs[k] || 0) + 1;
@@ -2644,7 +2648,7 @@ function creerCommande(maj, dossierId, devisNumero) {
   const sg = (st.signes || {})[devisNumero], sn = sg && sg.payload && lire(sg.payload);
   const d = sn ? sn.d : devisCalc(st, compute(st));
   if (!d) return null;
-  const lignes = (part, type) => part.groupes.flatMap(o => o.lignes.map(p => ({ id: p.id, nom: p.nom, type, qte: Math.max(1, num(p.qte) || 1), pu: cts(p.prix) })));
+  const lignes = (part, type) => part.groupes.flatMap(o => o.lignes.map(p => ({ id: p.id, bloc: o.id, nom: p.nom, type, qte: Math.max(1, num(p.qte) || 1), pu: cts(p.prix) })));
   const lP = lignes(d.P, 'ponctuel'), lM = lignes(d.M, 'mensuel');
   const ids = [...lP, ...lM].map(x => x.id);
   return maj(f => {
@@ -2749,7 +2753,8 @@ function PageCommande({ id }) {
           <div className="mt-4 flex flex-wrap gap-2">
             {c.netP > 0 && !acompteFait && !soldeFait && <button onClick={() => nouvelle('acompte')} className="rounded-xl bg-accent px-4 py-2 text-sm font-semibold text-white">Facturer l'acompte ({c.acomptePct || 30} %)</button>}
             {c.netP > 0 && !soldeFait && <button onClick={() => nouvelle('solde')} className={'rounded-xl px-4 py-2 text-sm font-semibold ' + (acompteFait ? 'bg-accent text-white' : 'border border-gray-200')}>Facturer {acompteFait ? 'le solde' : 'la création'}</button>}
-            {c.netM > 0 && <button onClick={() => nouvelle('mensuel')} className="rounded-xl border border-gray-200 px-4 py-2 text-sm font-semibold">Facturer la mensualité</button>}
+            {c.netM > 0 && !(f.abonnements || []).some(a => a.commandeId === c.id) && <button onClick={() => { creerAbonnement(maj, c); location.hash = '#/abonnements'; }} className="rounded-xl bg-sky-700 px-4 py-2 text-sm font-semibold text-white">Créer l'abonnement ({eurC(c.netM)}/mois)</button>}
+            {c.netM > 0 && (f.abonnements || []).some(a => a.commandeId === c.id) && <a href="#/abonnements" className="rounded-xl border border-gray-200 px-4 py-2 text-sm font-semibold">Voir l'abonnement</a>}
             <button onClick={() => nouvelle('libre')} className="rounded-xl px-3 py-2 text-sm text-gray-500 hover:bg-gray-100">Facture libre</button>
           </div>
         </div>
@@ -2973,6 +2978,379 @@ function PageFacture({ id }) {
       <Toast msg={msg} />
     </Shell>
   );
+}
+
+/* ============================ Phase 3 : abonnements, dépenses, rentabilité, statistiques, alertes ============================ */
+const CATEGORIES_DEPENSE = ['Hébergement', 'Domaines', 'Logiciels', 'Sous-traitance', 'Publicité', 'Déplacements', 'Matériel', 'Autres charges'];
+const STATUTS_ABO = { actif: ['Actif', '#047857'], suspendu: ['Suspendu', '#b45309'], resilie: ['Résilié', '#9ca3af'] };
+const SERIE = ['#2a78d6', '#eb6834', '#1baf7a']; // palette catégorielle de référence, 3 premiers emplacements (validés tous couples)
+const cleMois = (iso) => (iso || '').slice(0, 7);
+const libMois = (cle) => new Date(cle + '-15').toLocaleDateString('fr-FR', { month: 'short', year: '2-digit' });
+const finMois = (cle) => { const [a, m] = cle.split('-').map(Number); return isoJour(new Date(a, m, 0)); };
+const ajouterMois = (iso, n) => { const d = new Date(iso + 'T12:00'); d.setMonth(d.getMonth() + n); return isoJour(d); };
+const listeMois = (n) => { const out = [], d = new Date(); d.setDate(15); for (let i = n - 1; i >= 0; i--) { const x = new Date(d); x.setMonth(d.getMonth() - i); out.push(isoJour(x).slice(0, 7)); } return out; };
+const aboActifA = (a, jour) => a.debut && a.debut <= jour && a.statut !== 'suspendu' && !(a.resilieLe && a.resilieLe <= jour);
+
+// Abonnement créé à partir des services mensuels d'une commande
+function creerAbonnement(maj, cmd) {
+  return maj(f => {
+    const a = { id: nouvelId(), dossierId: cmd.dossierId, commandeId: cmd.id, services: cmd.lignes.filter(x => x.type === 'mensuel').map(x => ({ nom: x.nom, montant: Math.round(x.pu * x.qte) })),
+      montantM: cmd.netM, debut: isoJour(), engagement: cmd.mois || 0, statut: 'actif', prochaineEcheance: isoJour(), creeLe: new Date().toISOString(),
+      historique: [{ date: new Date().toISOString(), texte: 'Abonnement créé depuis la commande ' + cmd.numero }] };
+    f.abonnements = [...(f.abonnements || []), a];
+    return a.id;
+  }, { action: 'abonnement créé', ref: cmd.numero + ' · ' + eurC(cmd.netM) + '/mois', dossierId: cmd.dossierId });
+}
+const renouvellementDe = (a) => (a.engagement && a.debut ? ajouterMois(a.debut, num(a.engagement)) : '');
+// Facture de la mensualité d'un abonnement (brouillon), et prochaine échéance avancée d'un mois
+function facturerAbonnement(maj, a) {
+  const cmd = lireFinance().commandes.find(c => c.id === a.commandeId);
+  const st = load(lireJSON(DK(a.dossierId)) || {});
+  return maj(f => {
+    const mois = new Date((a.prochaineEcheance || isoJour()) + 'T12:00').toLocaleDateString('fr-FR', { month: 'long', year: 'numeric' });
+    const brut = a.services.reduce((s, x) => s + x.montant, 0);
+    const lignes = a.services.map(x => ({ designation: `${x.nom} (${mois})`, qte: 1, pu: x.montant }));
+    if (brut - a.montantM > 0) lignes.push({ designation: 'Remise commerciale', qte: 1, pu: -(brut - a.montantM) });
+    const fa = { id: nouvelId(), type: 'facture', nature: 'mensuel', abonnementId: a.id, numero: '', statut: 'brouillon', dossierId: a.dossierId, commandeId: a.commandeId,
+      objet: `Abonnement · ${mois}${cmd ? ' · commande ' + cmd.numero : ''}`, lignes, tva: num(st.tva), dateEmission: '', dateEcheance: '', creeLe: new Date().toISOString(), journal: [{ date: new Date().toISOString(), texte: 'Brouillon créé' }] };
+    Object.assign(fa, totauxFacture(fa));
+    f.factures = [...f.factures, fa];
+    f.abonnements = f.abonnements.map(x => x.id === a.id ? { ...x, prochaineEcheance: ajouterMois(x.prochaineEcheance || isoJour(), 1), historique: [...(x.historique || []), { date: new Date().toISOString(), texte: 'Mensualité ' + mois + ' facturée (brouillon)' }] } : x);
+    return fa.id;
+  }, { action: 'mensualité facturée', ref: eurC(a.montantM), dossierId: a.dossierId });
+}
+
+// Indicateurs récurrents sur une période
+function recurrent(f, periode) {
+  const abos = f.abonnements || [], auj = isoJour(), deb = isoJour(debutPeriode(periode));
+  const actifs = abos.filter(a => aboActifA(a, auj));
+  const mrr = actifs.reduce((s, a) => s + a.montantM, 0);
+  const nouveaux = abos.filter(a => a.debut && a.debut >= deb);
+  const resilies = abos.filter(a => a.resilieLe && a.resilieLe >= deb);
+  const actifsDebut = abos.filter(a => aboActifA(a, deb)).length;
+  return { mrr, arr: mrr * 12, actifs: actifs.length, nouveaux: nouveaux.length, resilies: resilies.length, perdu: resilies.reduce((s, a) => s + a.montantM, 0),
+    churn: actifsDebut ? Math.round(resilies.length / actifsDebut * 100) : null };
+}
+
+// Rentabilité : CA facturé − dépenses. Ce n'est ni la trésorerie, ni le bénéfice net (cotisations et impôts non déduits).
+function rentabilite(f, periode) {
+  const deb = isoJour(debutPeriode(periode));
+  const fact = f.factures.filter(x => x.statut !== 'brouillon' && x.dateEmission >= deb);
+  const ca = fact.reduce((s, x) => s + (x.type === 'avoir' ? -x.totalTTC : x.totalTTC), 0);
+  const dep = (f.depenses || []).filter(d => d.date >= deb);
+  const depenses = dep.reduce((s, d) => s + d.montant, 0), directes = dep.filter(d => d.dossierId).reduce((s, d) => s + d.montant, 0);
+  const encaisse = f.paiements.filter(p => p.date >= deb).reduce((s, p) => s + (p.type === 'remboursement' ? -p.montant : p.montant), 0);
+  const parClient = {};
+  fact.forEach(x => { const c = (parClient[x.dossierId] = parClient[x.dossierId] || { ca: 0, dep: 0 }); c.ca += x.type === 'avoir' ? -x.totalTTC : x.totalTTC; });
+  dep.filter(d => d.dossierId).forEach(d => { const c = (parClient[d.dossierId] = parClient[d.dossierId] || { ca: 0, dep: 0 }); c.dep += d.montant; });
+  return { ca, depenses, directes, margeBrute: ca - directes, resultat: ca - depenses, tresorerie: encaisse - depenses, encaisse, parClient };
+}
+
+// CA signé par prestation et par pack, à partir des commandes (montants nets : la remise est répartie au prorata)
+function caParPrestation(f, deb) {
+  const pres = {}, packs = {};
+  f.commandes.filter(c => c.statut !== 'annulee' && c.creeLe >= deb).forEach(c => {
+    const kP = c.brutP ? c.netP / c.brutP : 1, kM = c.brutM ? c.netM / c.brutM : 1;
+    c.lignes.forEach(l => {
+      const v = Math.round(l.pu * l.qte * (l.type === 'mensuel' ? kM * Math.max(1, c.mois || 0) : kP));
+      const p = (pres[l.id] = pres[l.id] || { nom: (CATALOGUE.find(x => x.id === l.id) || {}).court || l.nom, ca: 0, n: 0 }); p.ca += v; p.n++;
+      const bloc = l.bloc || (CATALOGUE.find(x => x.id === l.id) || {}).offre || 'base';
+      const k = (packs[bloc] = packs[bloc] || { ca: 0, cmds: new Set() }); k.ca += v; k.cmds.add(c.id);
+    });
+  });
+  return { pres, packs };
+}
+
+// Alertes calculées à partir des dates et des statuts (aucun message envoyé)
+function alertes() {
+  const idx = lireJSON(IDX) || { dossiers: [] }, f = lireFinance(), auj = isoJour(), dans = (n) => plusJours(n), out = [];
+  idx.dossiers.filter(d => !d.archive).forEach(d => {
+    const e = normEtape(d.etape);
+    if (['a_contacter', 'rdv', 'proposition', 'negociation'].includes(e) && d.prochaine && d.prochaine.date && d.prochaine.date < auj)
+      out.push({ niv: 2, txt: `Relance en retard : ${d.entreprise}`, sous: d.prochaine.action, h: '#/c/' + d.id });
+    if (['proposition', 'negociation'].includes(e)) { const st = lireJSON(DK(d.id)); const env = st && (st.envois || {})[d.numero];
+      if (env && !(st.signes || {})[d.numero] && env.date.slice(0, 10) <= plusJours(-7)) out.push({ niv: 1, txt: `Devis sans réponse : ${d.entreprise}`, sous: `lien envoyé le ${jourCourt(env.date)}`, h: '#/c/' + d.id }); }
+  });
+  f.factures.filter(x => x.type === 'facture' && x.statut !== 'brouillon').forEach(x => { const e = etatFacture(x, f);
+    if (e.statut === 'retard') out.push({ niv: 3, txt: `Impayé : ${x.numero} · ${nomDossier(x.dossierId)}`, sous: `${eurC(e.reste)} échu le ${jourCourt(x.dateEcheance)}`, h: '#/facture/' + x.id });
+    else if (e.reste > 0 && x.dateEcheance && x.dateEcheance <= dans(7)) out.push({ niv: 1, txt: `Échéance proche : ${x.numero}`, sous: `${eurC(e.reste)} le ${jourCourt(x.dateEcheance)}`, h: '#/facture/' + x.id }); });
+  f.factures.filter(x => x.statut === 'brouillon').forEach(x => out.push({ niv: 1, txt: `Facture en brouillon : ${nomDossier(x.dossierId)}`, sous: x.objet, h: '#/facture/' + x.id }));
+  f.commandes.forEach(c => {
+    if (['en_cours', 'validation'].includes(c.statut) && c.livraisonPrevue && c.livraisonPrevue < auj) out.push({ niv: 2, txt: `Commande en retard : ${c.numero}`, sous: `${nomDossier(c.dossierId)} · prévue le ${jourCourt(c.livraisonPrevue)}`, h: '#/commande/' + c.id });
+    if (c.site && c.site.renouvellement && c.site.renouvellement <= dans(30)) out.push({ niv: c.site.renouvellement < auj ? 3 : 1, txt: `Renouvellement du domaine ${c.site.domaine || ''}`, sous: `${nomDossier(c.dossierId)} · le ${jourCourt(c.site.renouvellement)}`, h: '#/commande/' + c.id });
+  });
+  (f.abonnements || []).filter(a => a.statut === 'actif').forEach(a => {
+    if (a.prochaineEcheance && a.prochaineEcheance <= auj) out.push({ niv: 2, txt: `Mensualité à facturer : ${nomDossier(a.dossierId)}`, sous: `${eurC(a.montantM)} · échéance du ${jourCourt(a.prochaineEcheance)}`, h: '#/abonnements' });
+    const r = renouvellementDe(a); if (r && r <= dans(30)) out.push({ niv: 1, txt: `Fin d'engagement : ${nomDossier(a.dossierId)}`, sous: `le ${jourCourt(r)} · proposer le renouvellement`, h: '#/abonnements' });
+  });
+  return out.sort((a, b) => b.niv - a.niv);
+}
+const NIVEAUX = { 3: ['Critique', 'bg-red-100 text-red-800', '⛔'], 2: ['Important', 'bg-amber-100 text-amber-900', '⚠'], 1: ['À suivre', 'bg-sky-100 text-sky-900', 'ℹ'] };
+function ListeAlertes({ max = 6 }) {
+  const [tout, setTout] = useState(false);
+  const a = useMemo(alertes, []);
+  if (!a.length) return <div className="rounded-2xl bg-white p-4 text-sm text-gray-500 ring-1 ring-black/5">✓ Rien à traiter : aucune relance, échéance ou retard.</div>;
+  return (
+    <div className="rounded-2xl bg-white p-4 ring-1 ring-black/5">
+      <p className="font-semibold">À traiter <span className="font-normal text-gray-500">{a.length}</span></p>
+      <ul className="mt-2 divide-y divide-gray-100">{(tout ? a : a.slice(0, max)).map((x, i) => (
+        <li key={i}><a href={x.h} className="flex items-center gap-3 py-2.5 hover:bg-gray-50">
+          <span className={'shrink-0 rounded-full px-2 py-0.5 text-[11px] font-bold ' + NIVEAUX[x.niv][1]}>{NIVEAUX[x.niv][2]} {NIVEAUX[x.niv][0]}</span>
+          <span className="min-w-0"><span className="block truncate font-medium">{x.txt}</span><span className="block truncate text-[13px] text-gray-500">{x.sous}</span></span></a></li>))}</ul>
+      {a.length > max && <button onClick={() => setTout(!tout)} className="mt-1 text-sm font-medium text-gray-500 underline">{tout ? 'Réduire' : `Voir les ${a.length} alertes`}</button>}
+    </div>
+  );
+}
+
+// ---------- graphiques (SVG, survol + vue tableau) ----------
+const echelle = (max) => { if (max <= 0) return [0, 1]; const p = Math.pow(10, Math.floor(Math.log10(max))); const n = [1, 2, 2.5, 5, 10].map(k => k * p).find(v => v * 4 >= max) || p * 10; return [0, n * 4]; };
+const eurCourt = (c) => { const e = c / 100; return Math.abs(e) >= 1000 ? (e / 1000).toLocaleString('fr-FR', { maximumFractionDigits: 1 }) + ' k€' : Math.round(e) + ' €'; };
+function CarteGraphe({ titre, sous, legende, children, tableau, vide }) {
+  const [vue, setVue] = useState('graphe');
+  return (
+    <div className="rounded-2xl bg-white p-4 ring-1 ring-black/5">
+      <div className="flex flex-wrap items-start justify-between gap-2">
+        <div><p className="font-semibold">{titre}</p>{sous && <p className="text-xs text-gray-500">{sous}</p>}</div>
+        {!vide && tableau && <button onClick={() => setVue(vue === 'graphe' ? 'table' : 'graphe')} className="rounded-lg px-2 py-1 text-xs font-medium text-gray-500 ring-1 ring-gray-200 hover:bg-gray-50">{vue === 'graphe' ? 'Voir le tableau' : 'Voir le graphique'}</button>}
+      </div>
+      {vide ? <p className="py-8 text-center text-sm text-gray-400">{vide}</p> : <>
+        {legende && vue === 'graphe' && <div className="mt-2 flex flex-wrap gap-3 text-xs text-gray-600">{legende.map(([n, c]) => <span key={n} className="flex items-center gap-1.5"><span className="h-2.5 w-2.5 rounded-sm" style={{ background: c }} />{n}</span>)}</div>}
+        <div className="mt-2">{vue === 'graphe' ? children : tableau}</div>
+      </>}
+    </div>
+  );
+}
+const TableSimple = ({ tete, lignes }) => (
+  <div className="overflow-x-auto"><table className="tabular w-full text-[13px]"><thead><tr className="border-b border-gray-200 text-left text-[11px] uppercase tracking-wide text-gray-500">{tete.map((t, i) => <th key={i} className={'py-1.5 ' + (i ? 'text-right' : '')}>{t}</th>)}</tr></thead>
+    <tbody>{lignes.map((l, i) => <tr key={i} className="border-b border-gray-50">{l.map((v, j) => <td key={j} className={'py-1.5 ' + (j ? 'text-right' : '')}>{v}</td>)}</tr>)}</tbody></table></div>);
+
+function BarresMois({ mois, series }) {
+  const [survol, setSurvol] = useState(null);
+  const W = 640, H = 220, g = 44, b = 20, h = H - b - 8;
+  const [, max] = echelle(Math.max(1, ...series.flatMap(s => s.valeurs)));
+  const bande = (W - g) / mois.length, larg = Math.min(18, (bande - 10) / series.length - 2);
+  const y = (v) => 8 + h - (v / max) * h;
+  return (
+    <div className="relative">
+      <svg viewBox={`0 0 ${W} ${H}`} className="w-full" role="img" aria-label="Histogramme mensuel">
+        {[0, 1, 2, 3, 4].map(i => { const v = max / 4 * i; return <g key={i}><line x1={g} x2={W} y1={y(v)} y2={y(v)} stroke="#e5e7eb" strokeWidth="1" /><text x={g - 6} y={y(v) + 3} textAnchor="end" fontSize="10" fill="#6b7280">{eurCourt(v)}</text></g>; })}
+        {mois.map((m, i) => { const x0 = g + i * bande + (bande - series.length * (larg + 2)) / 2;
+          return <g key={m}>
+            {series.map((s, j) => { const v = s.valeurs[i], hh = Math.max(0, y(0) - y(v)), x = x0 + j * (larg + 2), r = Math.min(4, hh / 2, larg / 2);
+              return hh > 0 ? <path key={j} d={`M${x},${y(0)} V${y(v) + r} Q${x},${y(v)} ${x + r},${y(v)} H${x + larg - r} Q${x + larg},${y(v)} ${x + larg},${y(v) + r} V${y(0)} Z`} fill={s.coul} opacity={survol === null || survol === i ? 1 : 0.35} /> : null; })}
+            <text x={g + i * bande + bande / 2} y={H - 4} textAnchor="middle" fontSize="10" fill="#6b7280">{libMois(m)}</text>
+            <rect x={g + i * bande} y="0" width={bande} height={H} fill="transparent" onMouseEnter={() => setSurvol(i)} onMouseLeave={() => setSurvol(null)} onTouchStart={() => setSurvol(i)} />
+          </g>; })}
+      </svg>
+      {survol !== null && <div className="pointer-events-none absolute top-0 rounded-lg bg-white px-3 py-2 text-xs shadow-lg ring-1 ring-black/10" style={{ left: `min(calc(${((g + survol * bande + bande) / W) * 100}% + 4px), calc(100% - 170px))` }}>
+        <p className="font-semibold">{libMois(mois[survol])}</p>{series.map(s => <p key={s.nom} className="flex items-center justify-between gap-4"><span className="flex items-center gap-1.5"><span className="h-2 w-2 rounded-sm" style={{ background: s.coul }} />{s.nom}</span><span className="tabular font-medium">{eurC(s.valeurs[survol])}</span></p>)}</div>}
+    </div>
+  );
+}
+function CourbeMois({ mois, valeurs, coul = SERIE[0], nom }) {
+  const [survol, setSurvol] = useState(null);
+  const W = 640, H = 180, g = 44, b = 20, h = H - b - 10;
+  const [, max] = echelle(Math.max(1, ...valeurs));
+  const pas = mois.length > 1 ? (W - g - 40) / (mois.length - 1) : 0, x = (i) => g + 16 + i * pas, y = (v) => 10 + h - (v / max) * h;
+  return (
+    <div className="relative">
+      <svg viewBox={`0 0 ${W} ${H}`} className="w-full" role="img" aria-label={nom}>
+        {[0, 1, 2, 3, 4].map(i => { const v = max / 4 * i; return <g key={i}><line x1={g} x2={W} y1={y(v)} y2={y(v)} stroke="#e5e7eb" /><text x={g - 6} y={y(v) + 3} textAnchor="end" fontSize="10" fill="#6b7280">{eurCourt(v)}</text></g>; })}
+        {survol !== null && <line x1={x(survol)} x2={x(survol)} y1="10" y2={y(0)} stroke="#9ca3af" strokeDasharray="3 3" />}
+        <polyline points={valeurs.map((v, i) => `${x(i)},${y(v)}`).join(' ')} fill="none" stroke={coul} strokeWidth="2" strokeLinejoin="round" />
+        {valeurs.map((v, i) => <circle key={i} cx={x(i)} cy={y(v)} r={survol === i ? 5 : 4} fill={coul} stroke="#fff" strokeWidth="2" />)}
+        {mois.map((m, i) => <text key={m} x={x(i)} y={H - 4} textAnchor="middle" fontSize="10" fill="#6b7280">{libMois(m)}</text>)}
+        {mois.map((m, i) => <rect key={'h' + m} x={x(i) - pas / 2} y="0" width={Math.max(pas, 30)} height={H} fill="transparent" onMouseEnter={() => setSurvol(i)} onMouseLeave={() => setSurvol(null)} onTouchStart={() => setSurvol(i)} />)}
+      </svg>
+      {survol !== null && <div className="pointer-events-none absolute top-0 rounded-lg bg-white px-3 py-2 text-xs shadow-lg ring-1 ring-black/10" style={{ left: `min(calc(${(x(survol) / W) * 100}% + 8px), calc(100% - 150px))` }}><p className="font-semibold">{libMois(mois[survol])}</p><p className="tabular">{nom} : <b>{eurC(valeurs[survol])}</b></p></div>}
+    </div>
+  );
+}
+function BarresH({ lignes, coul = SERIE[0] }) {
+  const max = Math.max(1, ...lignes.map(l => Math.abs(l.v)));
+  return <ul className="space-y-2">{lignes.map(l => (
+    <li key={l.nom} className="text-[13px]" title={`${l.nom} : ${eurC(l.v)}`}>
+      <div className="flex justify-between gap-3"><span className="truncate">{l.nom}</span><span className="tabular shrink-0 font-medium">{eurC(l.v)}{l.sous ? <span className="ml-1 font-normal text-gray-500">{l.sous}</span> : null}</span></div>
+      <div className="mt-1 h-2 rounded-full bg-gray-100"><div className="h-full rounded-full" style={{ width: Math.max(2, Math.abs(l.v) / max * 100) + '%', background: l.v < 0 ? '#e34948' : coul }} /></div>
+    </li>))}</ul>;
+}
+
+// ---------- écrans ----------
+function PageAbonnements() {
+  const [f, maj] = useFinance();
+  const [periode, setPeriode] = useState('annee'), [msg, setMsg] = useState('');
+  const toast = (m) => { setMsg(m); setTimeout(() => setMsg(''), 4000); };
+  const r = recurrent(f, periode), abos = [...(f.abonnements || [])].sort((a, b) => (a.statut === 'actif' ? 0 : 1) - (b.statut === 'actif' ? 0 : 1) || (a.prochaineEcheance || '').localeCompare(b.prochaineEcheance || ''));
+  const sansAbo = f.commandes.filter(c => c.netM > 0 && c.statut !== 'annulee' && !(f.abonnements || []).some(a => a.commandeId === c.id));
+  const set = (id, patch, j) => maj(x => { x.abonnements = x.abonnements.map(a => a.id === id ? { ...a, ...patch, historique: [...(a.historique || []), ...(j ? [{ date: new Date().toISOString(), texte: j }] : [])] } : a); }, j ? { action: 'abonnement : ' + j, ref: id } : null);
+  const statut = (a, s) => {
+    if (s === 'resilie') { const motif = prompt('Motif de la résiliation ?', ''); if (motif === null) return; set(a.id, { statut: s, resilieLe: isoJour(), motif }, 'résilié' + (motif ? ' · ' + motif : '')); }
+    else set(a.id, { statut: s, ...(s === 'actif' ? { resilieLe: '' } : {}) }, s === 'actif' ? 'réactivé' : 'suspendu');
+  };
+  return (
+    <Shell page="abonnements">
+      <div className="mx-auto max-w-5xl space-y-4 px-4 pb-28 pt-6 sm:px-6">
+        <div className="flex flex-wrap items-end justify-between gap-3"><h1 className="font-display text-2xl font-bold sm:text-3xl">Abonnements</h1><Periode value={periode} onChange={setPeriode} /></div>
+        <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+          <Tuile titre="MRR" val={eurC(r.mrr)} sous={`${r.actifs} abonnement(s) actif(s)`} cls="bg-sky-50 text-sky-900" />
+          <Tuile titre="ARR" val={eurC(r.arr)} sous="MRR × 12" />
+          <Tuile titre="Nouveaux / résiliés" val={`${r.nouveaux} / ${r.resilies}`} sous={r.perdu ? `${eurC(r.perdu)}/mois perdus` : 'sur la période'} />
+          <Tuile titre="Taux de résiliation" val={r.churn === null ? '—' : r.churn + ' %'} sous="résiliés / actifs en début de période" cls={r.churn ? 'bg-red-50 text-red-900' : 'bg-white'} />
+        </div>
+        {sansAbo.map(c => <div key={c.id} className="flex flex-wrap items-center gap-3 rounded-2xl bg-sky-50 px-4 py-3 text-sm text-sky-900 ring-1 ring-sky-200">
+          <span>La commande {c.numero} ({nomDossier(c.dossierId)}) contient {eurC(c.netM)}/mois de services, sans abonnement.</span>
+          <button onClick={() => { creerAbonnement(maj, c); toast('Abonnement créé.'); }} className="ml-auto rounded-lg bg-sky-700 px-3 py-1.5 font-semibold text-white">Créer l'abonnement</button></div>)}
+        {abos.length ? <div className="space-y-3">{abos.map(a => { const ren = renouvellementDe(a), du = a.statut === 'actif' && a.prochaineEcheance && a.prochaineEcheance <= isoJour();
+          const factA = f.factures.filter(x => x.abonnementId === a.id && x.statut !== 'brouillon'), payes = factA.reduce((s, x) => s + etatFacture(x, f).paye, 0);
+          return <div key={a.id} className="rounded-2xl bg-white p-4 ring-1 ring-black/5">
+            <div className="flex flex-wrap items-start justify-between gap-2">
+              <div><a href={'#/c/' + a.dossierId} className="font-semibold hover:underline">{nomDossier(a.dossierId)}</a><p className="text-xs text-gray-500">{a.services.map(s => s.nom).join(', ')}</p></div>
+              <div className="text-right"><p className="tabular font-display text-xl font-bold">{eurC(a.montantM)}<span className="font-sans text-xs font-medium text-gray-500">/mois</span></p><span className="rounded-full px-2.5 py-0.5 text-[11px] font-bold text-white" style={{ background: STATUTS_ABO[a.statut][1] }}>{STATUTS_ABO[a.statut][0]}</span></div>
+            </div>
+            <div className="mt-3 grid grid-cols-2 gap-2 text-[13px] sm:grid-cols-4">
+              <label><span className="block text-[11px] font-bold uppercase tracking-wider text-gray-500">Début</span><input type="date" value={a.debut || ''} onChange={e => set(a.id, { debut: e.target.value })} className="w-full rounded border border-gray-200 px-2 py-1" /></label>
+              <label><span className="block text-[11px] font-bold uppercase tracking-wider text-gray-500">Engagement (mois)</span><input type="number" min="0" value={a.engagement} onChange={e => set(a.id, { engagement: e.target.value })} className="w-full rounded border border-gray-200 px-2 py-1" /></label>
+              <p><span className="block text-[11px] font-bold uppercase tracking-wider text-gray-500">Renouvellement</span>{ren ? fmtDate(new Date(ren + 'T12:00')) : 'sans engagement'}</p>
+              <label><span className="block text-[11px] font-bold uppercase tracking-wider text-gray-500">Prochaine échéance</span><input type="date" value={a.prochaineEcheance || ''} onChange={e => set(a.id, { prochaineEcheance: e.target.value })} className={'w-full rounded border px-2 py-1 ' + (du ? 'border-amber-400 bg-amber-50' : 'border-gray-200')} /></label>
+            </div>
+            <p className="mt-2 text-xs text-gray-500">{factA.length} mensualité(s) facturée(s) · {eurC(payes)} payé(s){a.motif ? ' · résiliation : ' + a.motif : ''}</p>
+            <div className="mt-3 flex flex-wrap gap-2">
+              {a.statut === 'actif' && <button onClick={() => { const fid = facturerAbonnement(maj, a); location.hash = '#/facture/' + fid; }} className={'rounded-xl px-3 py-1.5 text-sm font-semibold ' + (du ? 'bg-accent text-white' : 'border border-gray-200')}>Facturer la mensualité{du ? ' (due)' : ''}</button>}
+              {a.statut === 'actif' && <button onClick={() => statut(a, 'suspendu')} className="rounded-xl px-3 py-1.5 text-sm text-gray-600 hover:bg-gray-100">Suspendre</button>}
+              {a.statut !== 'actif' && <button onClick={() => statut(a, 'actif')} className="rounded-xl px-3 py-1.5 text-sm text-gray-600 hover:bg-gray-100">Réactiver</button>}
+              {a.statut !== 'resilie' && <button onClick={() => statut(a, 'resilie')} className="rounded-xl px-3 py-1.5 text-sm text-red-600 hover:bg-red-50">Résilier</button>}
+            </div>
+          </div>; })}</div>
+          : <div className="rounded-2xl border border-dashed border-gray-300 p-8 text-center text-sm text-gray-500">Aucun abonnement. Il se crée à partir d'une commande qui contient des services mensuels.</div>}
+        <p className="text-[11px] text-gray-400">Le MRR ne compte que les abonnements actifs (ni suspendus, ni résiliés).</p>
+      </div>
+      <Toast msg={msg} />
+    </Shell>
+  );
+}
+
+function PageDepenses() {
+  const [f, maj] = useFinance();
+  const idx = lireJSON(IDX) || { dossiers: [] };
+  const vide = { date: isoJour(), categorie: 'Logiciels', libelle: '', montant: '', dossierId: '', prestation: '' };
+  const [form, setForm] = useState(vide), [periode, setPeriode] = useState('annee');
+  const deb = isoJour(debutPeriode(periode));
+  const deps = (f.depenses || []).filter(d => d.date >= deb).sort((a, b) => b.date.localeCompare(a.date));
+  const total = deps.reduce((s, d) => s + d.montant, 0);
+  const parCat = CATEGORIES_DEPENSE.map(c => ({ nom: c, v: deps.filter(d => d.categorie === c).reduce((s, d) => s + d.montant, 0) })).filter(x => x.v);
+  const ajouter = () => {
+    if (!form.libelle.trim() || cts(form.montant) <= 0) return alert('Indiquez un libellé et un montant positif.');
+    const doublon = (f.depenses || []).find(d => d.date === form.date && d.montant === cts(form.montant) && d.libelle.toLowerCase() === form.libelle.trim().toLowerCase());
+    if (doublon && !confirm('Une dépense identique existe déjà ce jour-là. L\'ajouter quand même ?')) return;
+    maj(x => { x.depenses = [...(x.depenses || []), { id: nouvelId(), ...form, libelle: form.libelle.trim(), montant: cts(form.montant), creeLe: new Date().toISOString() }]; }, { action: 'dépense', ref: form.libelle + ' · ' + eurC(cts(form.montant)), dossierId: form.dossierId || undefined });
+    setForm({ ...vide, categorie: form.categorie, date: form.date });
+  };
+  const suppr = (d) => { if (confirm(`Supprimer la dépense « ${d.libelle} » (${eurC(d.montant)}) ?`)) maj(x => { x.depenses = x.depenses.filter(y => y.id !== d.id); }, { action: 'dépense supprimée', ref: d.libelle + ' · ' + eurC(d.montant) }); };
+  return (
+    <Shell page="depenses">
+      <div className="mx-auto max-w-5xl space-y-4 px-4 pb-28 pt-6 sm:px-6">
+        <div className="flex flex-wrap items-end justify-between gap-3"><h1 className="font-display text-2xl font-bold sm:text-3xl">Dépenses</h1><Periode value={periode} onChange={setPeriode} /></div>
+        <div className="rounded-2xl bg-white p-4 ring-1 ring-black/5">
+          <p className="font-semibold">Nouvelle dépense</p>
+          <div className="mt-2 grid gap-2 sm:grid-cols-6">
+            <input type="date" value={form.date} onChange={e => setForm({ ...form, date: e.target.value })} className="rounded-lg border border-gray-200 px-2 py-2 text-sm" />
+            <select value={form.categorie} onChange={e => setForm({ ...form, categorie: e.target.value })} className="rounded-lg border border-gray-200 px-2 py-2 text-sm">{CATEGORIES_DEPENSE.map(c => <option key={c}>{c}</option>)}</select>
+            <input value={form.libelle} onChange={e => setForm({ ...form, libelle: e.target.value })} placeholder="Libellé (ex. abonnement Canva)" className="rounded-lg border border-gray-200 px-3 py-2 text-sm sm:col-span-2" />
+            <input type="number" step="0.01" min="0" value={form.montant} onChange={e => setForm({ ...form, montant: e.target.value })} placeholder="Montant €" className="rounded-lg border border-gray-200 px-3 py-2 text-right text-sm" />
+            <select value={form.dossierId} onChange={e => setForm({ ...form, dossierId: e.target.value })} className="rounded-lg border border-gray-200 px-2 py-2 text-sm"><option value="">Activité générale</option>{idx.dossiers.map(d => <option key={d.id} value={d.id}>{d.entreprise}</option>)}</select>
+            <select value={form.prestation} onChange={e => setForm({ ...form, prestation: e.target.value })} className="rounded-lg border border-gray-200 px-2 py-2 text-sm sm:col-span-2"><option value="">Prestation : aucune</option>{CATALOGUE.map(p => <option key={p.id} value={p.id}>{p.court || p.nom}</option>)}</select>
+            <button onClick={ajouter} className="rounded-xl bg-ink py-2 text-sm font-semibold text-white sm:col-span-4">+ Ajouter la dépense</button>
+          </div>
+        </div>
+        <div className="grid gap-4 lg:grid-cols-3">
+          <div className="lg:col-span-2">{deps.length ? <div className="divide-y divide-gray-100 overflow-hidden rounded-2xl bg-white ring-1 ring-black/5">{deps.map(d => (
+            <div key={d.id} className="flex flex-wrap items-center gap-x-3 px-4 py-2.5 text-sm"><span className="w-16 text-gray-500">{jourCourt(d.date)}</span><span className="min-w-0 flex-1"><span className="block truncate font-medium">{d.libelle}</span><span className="block truncate text-xs text-gray-500">{d.categorie}{d.dossierId ? ' · ' + nomDossier(d.dossierId) : ' · activité générale'}{d.prestation ? ' · ' + ((CATALOGUE.find(p => p.id === d.prestation) || {}).court || d.prestation) : ''}</span></span>
+              <span className="tabular font-semibold">{eurC(d.montant)}</span><button onClick={() => suppr(d)} className="text-xs text-gray-300 hover:text-red-600" aria-label="Supprimer">✕</button></div>))}</div>
+            : <div className="rounded-2xl border border-dashed border-gray-300 p-8 text-center text-sm text-gray-500">Aucune dépense sur la période.</div>}</div>
+          <CarteGraphe titre={`Total : ${eurC(total)}`} sous="par catégorie" vide={!parCat.length && 'Aucune dépense.'} tableau={<TableSimple tete={['Catégorie', 'Montant']} lignes={parCat.map(x => [x.nom, eurC(x.v)])} />}>
+            <BarresH lignes={parCat.sort((a, b) => b.v - a.v)} coul={SERIE[1]} />
+          </CarteGraphe>
+        </div>
+      </div>
+    </Shell>
+  );
+}
+
+function PageStats() {
+  const f = lireFinance();
+  const idx = rafraichirIndex() || lireJSON(IDX) || { dossiers: [] };
+  const [n, setN] = useState(6);
+  const mois = listeMois(n === 0 ? Math.max(1, (() => { const all = [...f.factures.map(x => x.dateEmission), ...f.paiements.map(p => p.date), ...idx.dossiers.flatMap(d => (d.signesListe || []).map(s => s.quand))].filter(Boolean).sort(); if (!all.length) return 6; const d0 = new Date(all[0]); const d = new Date(); return (d.getFullYear() - d0.getFullYear()) * 12 + d.getMonth() - d0.getMonth() + 1; })()) : n);
+  const deb = mois[0] + '-01';
+  const parMois = (fn) => mois.map(m => fn(m));
+  const signe = parMois(m => idx.dossiers.flatMap(d => d.signesListe || []).filter(s => cleMois(s.quand) === m).reduce((a, s) => a + Math.round(valeurContrat(s) * 100), 0));
+  const facture = parMois(m => f.factures.filter(x => x.statut !== 'brouillon' && cleMois(x.dateEmission) === m).reduce((a, x) => a + (x.type === 'avoir' ? -x.totalTTC : x.totalTTC), 0));
+  const encaisse = parMois(m => f.paiements.filter(p => cleMois(p.date) === m).reduce((a, p) => a + (p.type === 'remboursement' ? -p.montant : p.montant), 0));
+  const depenses = parMois(m => (f.depenses || []).filter(d => cleMois(d.date) === m).reduce((a, d) => a + d.montant, 0));
+  const mrr = parMois(m => (f.abonnements || []).filter(a => aboActifA(a, finMois(m))).reduce((s, a) => s + a.montantM, 0));
+  const { pres, packs } = caParPrestation(f, deb);
+  const lp = Object.values(pres).sort((a, b) => b.ca - a.ca), top = lp.slice(0, 7), autres = lp.slice(7).reduce((s, x) => s + x.ca, 0);
+  const ds = idx.dossiers.map(d => ({ ...d, etape: normEtape(d.etape) }));
+  const gagnes = ds.filter(d => d.etape === 'signe' && (d.gagneLe || '') >= deb).length, perdus = ds.filter(d => d.etape === 'perdu' && (d.perduLe || d.maj || '') >= deb).length;
+  const signesL = ds.flatMap(d => d.signesListe || []).filter(s => (s.quand || '') >= deb);
+  const moyen = signesL.length ? signesL.reduce((a, s) => a + valeurContrat(s), 0) / signesL.length : 0;
+  const impayes = f.factures.filter(x => x.type === 'facture' && x.statut !== 'brouillon').map(x => ({ x, e: etatFacture(x, f) })).filter(({ e }) => e.reste > 0);
+  const rent = rentabilite(f, 'tout');
+  const deps = (f.depenses || []).filter(d => d.date >= deb);
+  const parClient = Object.entries(f.factures.filter(x => x.statut !== 'brouillon' && x.dateEmission >= deb).reduce((acc, x) => { acc[x.dossierId] = (acc[x.dossierId] || 0) + (x.type === 'avoir' ? -x.totalTTC : x.totalTTC); return acc; }, {}))
+    .map(([id, ca]) => { const dep = deps.filter(d => d.dossierId === id).reduce((s, d) => s + d.montant, 0); return { nom: nomDossier(id), v: ca - dep, sous: dep ? `(CA ${eurC(ca)} − ${eurC(dep)})` : '' }; }).sort((a, b) => b.v - a.v);
+  const depPres = (id) => deps.filter(d => d.prestation === id).reduce((s, d) => s + d.montant, 0);
+  const offres = (lireJSON(DK('boulangerie')) || {}).offres || OFFRES;
+  const pondere = ds.filter(d => !d.archive && OUVERTES.includes(d.etape)).reduce((a, d) => a + (d.estime || 0) * (d.proba ?? 0) / 100, 0);
+  const mrrAct = recurrent(f, 'tout').mrr;
+  const aucun = (arr) => arr.every(v => !v);
+  return (
+    <Shell page="stats">
+      <div className="mx-auto max-w-6xl space-y-4 px-4 pb-28 pt-6 sm:px-6">
+        <div className="flex flex-wrap items-end justify-between gap-3"><h1 className="font-display text-2xl font-bold sm:text-3xl">Statistiques</h1>
+          <div className="flex rounded-xl bg-gray-100 p-1">{[[3, '3 mois'], [6, '6 mois'], [12, '12 mois'], [0, 'Tout']].map(([v, l]) => <button key={v} onClick={() => setN(v)} className={'rounded-lg px-3 py-1.5 text-[13px] font-semibold ' + (n === v ? 'bg-white text-ink shadow-sm' : 'text-gray-500')}>{l}</button>)}</div></div>
+        <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+          <Tuile titre="Taux de conversion" val={gagnes + perdus ? Math.round(gagnes / (gagnes + perdus) * 100) + ' %' : '—'} sous={`${gagnes} gagnée(s), ${perdus} perdue(s)`} />
+          <Tuile titre="Contrat moyen" val={moyen ? eur(moyen) : '—'} sous={`${signesL.length} devis signé(s)`} />
+          <Tuile titre="Factures impayées" val={impayes.length} sous={eurC(impayes.reduce((a, { e }) => a + e.reste, 0)) + ' à encaisser'} cls={impayes.some(({ e }) => e.statut === 'retard') ? 'bg-red-50 text-red-900' : 'bg-white'} href="#/factures" />
+          <Tuile titre="Prévision 3 mois" val={eur(mrrAct * 3 / 100 + pondere)} sous={`MRR × 3 (${eurC(mrrAct * 3)}) + pipeline pondéré (${eur(pondere)})`} cls="bg-sky-50 text-sky-900" />
+        </div>
+        <CarteGraphe titre="Chiffre d'affaires mensuel" sous="Signé (création + mensuel sur l'engagement), facturé et encaissé : trois mesures différentes"
+          legende={[['Signé', SERIE[0]], ['Facturé', SERIE[1]], ['Encaissé', SERIE[2]]]} vide={aucun([...signe, ...facture, ...encaisse]) && 'Pas encore de données sur la période.'}
+          tableau={<TableSimple tete={['Mois', 'Signé', 'Facturé', 'Encaissé', 'Dépenses']} lignes={mois.map((m, i) => [libMois(m), eurC(signe[i]), eurC(facture[i]), eurC(encaisse[i]), eurC(depenses[i])])} />}>
+          <BarresMois mois={mois} series={[{ nom: 'Signé', coul: SERIE[0], valeurs: signe }, { nom: 'Facturé', coul: SERIE[1], valeurs: facture }, { nom: 'Encaissé', coul: SERIE[2], valeurs: encaisse }]} />
+        </CarteGraphe>
+        <div className="grid gap-4 lg:grid-cols-2">
+          <CarteGraphe titre="Évolution du MRR" sous="Abonnements actifs en fin de mois" vide={aucun(mrr) && 'Aucun abonnement actif sur la période.'}
+            tableau={<TableSimple tete={['Mois', 'MRR']} lignes={mois.map((m, i) => [libMois(m), eurC(mrr[i])])} />}>
+            <CourbeMois mois={mois} valeurs={mrr} nom="MRR" />
+          </CarteGraphe>
+          <CarteGraphe titre="Répartition du CA par prestation" sous="CA signé net (commandes), remises réparties" vide={!lp.length && 'Aucune commande sur la période.'}
+            tableau={<TableSimple tete={['Prestation', 'CA', 'Dépenses', 'Marge']} lignes={lp.map((x, i) => { const id = Object.keys(pres).find(k => pres[k] === x); return [x.nom, eurC(x.ca), eurC(depPres(id)), eurC(x.ca - depPres(id))]; })} />}>
+            <BarresH lignes={[...top.map(x => ({ nom: x.nom, v: x.ca })), ...(autres ? [{ nom: 'Autres', v: autres }] : [])]} />
+          </CarteGraphe>
+          <CarteGraphe titre="Performance des packs" sous="CA signé net par famille de prestations" vide={!Object.keys(packs).length && 'Aucune commande sur la période.'}
+            tableau={<TableSimple tete={['Pack', 'Commandes', 'CA']} lignes={Object.entries(packs).map(([k, x]) => [(offres.find(o => o.id === k) || { nom: k }).nom, x.cmds.size, eurC(x.ca)])} />}>
+            <BarresH lignes={Object.entries(packs).map(([k, x]) => ({ nom: (offres.find(o => o.id === k) || { nom: k }).nom, v: x.ca, sous: `· ${x.cmds.size} cmd` })).sort((a, b) => b.v - a.v)} />
+          </CarteGraphe>
+          <CarteGraphe titre="Rentabilité par client" sous="Facturé − dépenses affectées au client" vide={!parClient.length && 'Aucune facture émise sur la période.'}
+            tableau={<TableSimple tete={['Client', 'Marge']} lignes={parClient.map(x => [x.nom, eurC(x.v)])} />}>
+            <BarresH lignes={parClient.slice(0, 8)} coul={SERIE[2]} />
+          </CarteGraphe>
+        </div>
+        <CarteGraphe titre="Rentabilité mensuelle" sous="Facturé − dépenses du mois (résultat estimé)" vide={aucun([...facture, ...depenses]) && 'Pas encore de factures ni de dépenses.'}
+          tableau={<TableSimple tete={['Mois', 'Facturé', 'Dépenses', 'Résultat']} lignes={mois.map((m, i) => [libMois(m), eurC(facture[i]), eurC(depenses[i]), eurC(facture[i] - depenses[i])])} />}>
+          <BarresMois mois={mois} series={[{ nom: 'Facturé', coul: SERIE[1], valeurs: facture }, { nom: 'Dépenses', coul: SERIE[0], valeurs: depenses }]} />
+        </CarteGraphe>
+        <p className="text-[11px] text-gray-400">Depuis le début : facturé {eurC(rent.ca)}, dépenses {eurC(rent.depenses)}, résultat estimé {eurC(rent.resultat)}, trésorerie (encaissé − dépenses) {eurC(rent.tresorerie)}. Le résultat estimé n'est pas un bénéfice net : cotisations sociales et impôts ne sont pas déduits.</p>
+      </div>
+    </Shell>
+  );
+}
+
+function PageMenu() {
+  return <Shell page="menu"><div className="mx-auto max-w-md space-y-2 px-4 pb-28 pt-6"><h1 className="mb-3 font-display text-2xl font-bold">Menu</h1>
+    {NAV.map(([h, l, i]) => <a key={h} href={h} className="flex items-center gap-3 rounded-2xl bg-white px-4 py-3.5 text-[15px] font-semibold ring-1 ring-black/5"><span className="w-6 text-center">{i}</span>{l}</a>)}</div></Shell>;
 }
 
 function App({ dossierId }) {
