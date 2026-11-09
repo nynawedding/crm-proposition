@@ -3473,7 +3473,7 @@ function App({ dossierId }) {
     );
   };
 
-  return (
+  const contenu = (
     <>
       <div id="app-main">
         {/* Récapitulatif permanent */}
@@ -3511,7 +3511,12 @@ function App({ dossierId }) {
               <p className="text-sm text-gray-500">{dossierId ? `Dossier client · devis N° ${numero} · enregistrement automatique` : 'Enregistrement automatique sur cet appareil.'}</p>
             </div>
           </div>
-          {dossierId && <BandeauDossier s={s} set={set} toast={toast} numero={numero} />}
+          {dossierId && (() => { const et = etapeDe((s.suivi || {}).etape), pr = (s.suivi || {}).prochaine || {}, sg = (s.signes || {})[numero], env = (s.envois || {})[numero];
+            return <a href={'#/c/' + dossierId} className="flex flex-wrap items-center gap-2 rounded-2xl bg-white px-4 py-3 text-[13px] ring-1 ring-black/5 hover:shadow-sm">
+              <span className="rounded-full px-2.5 py-0.5 text-[11px] font-bold text-white" style={{ background: et.coul }}>{et.label}</span>
+              <span className="text-gray-600">{sg ? `Devis signé par ${sg.nom}` : env ? `Lien de signature envoyé le ${jourCourt(env.date)}` : 'Devis pas encore envoyé'}</span>
+              {pr.date && !sg && <span className={pr.date < isoJour() ? 'font-semibold text-red-600' : 'text-gray-500'}>· ⏰ {jourCourt(pr.date)} {pr.action}</span>}
+              <span className="ml-auto font-semibold text-ink">Suivi commercial →</span></a>; })()}
 
           {/* 1. Fiche client */}
           <Section n="1" title="Fiche client" hint={clientHint} open={!!open.client} onToggle={() => toggle('client')}>
@@ -3796,7 +3801,7 @@ function App({ dossierId }) {
         </main>
 
         {/* Bouton principal mobile */}
-        <div className="fixed inset-x-0 bottom-0 z-40 border-t border-gray-200 bg-white/95 p-3 backdrop-blur sm:hidden" style={{ paddingBottom: 'calc(.75rem + env(safe-area-inset-bottom))' }}>
+        <div className={'fixed inset-x-0 z-40 border-t border-gray-200 bg-white/95 p-3 backdrop-blur sm:hidden ' + (dossierId ? 'bottom-[52px]' : 'bottom-0')} style={{ paddingBottom: 'calc(.75rem + env(safe-area-inset-bottom))' }}>
           <button onClick={generate} className="w-full rounded-xl bg-accent py-3.5 text-base font-semibold text-white shadow-sm active:brightness-110">Générer la proposition commerciale</button>
         </div>
 
@@ -3828,6 +3833,8 @@ function App({ dossierId }) {
       <Toast msg={msg} />
     </>
   );
+  // dans le CRM : même menu latéral que les autres pages
+  return dossierId ? <Shell page="clients">{contenu}</Shell> : contenu;
 }
 
 ReactDOM.createRoot(document.getElementById('root')).render(<Racine />);
