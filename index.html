@@ -1421,7 +1421,7 @@ const enregistrerSignature = (snap, sig) => {
       if (deja && deja.quand !== sig.quand) return id; // déjà signé : la première signature fait foi
       st.signes = { ...(st.signes || {}), [numero]: sig };
       const su = st.suivi || {};
-      if (!deja) st.suivi = { ...su, etape: 'signe', prochaine: { date: '', action: '' },
+      if (!deja) st.suivi = { ...su, etape: 'signe', gagneLe: su.gagneLe || sig.quand, proba: undefined, prochaine: { date: '', action: '' },
         historique: [...(su.historique || []), { date: new Date().toISOString(), type: 'auto', texte: `Devis ${numero} signé par ${sig.nom}` }] };
       ecrireJSON(DK(id), st); majEntree(id, st);
       return id;
@@ -1504,9 +1504,11 @@ function Racine() {
   const [crm] = useState(() => (hash.startsWith('#signer=') || hash.startsWith('#signe=') ? null : initCRM()));
   if (hash.startsWith('#signer=') || hash.startsWith('#signe=')) return <PageSignature key={hash} hash={hash} />;
   if (!crm && !lireJSON(IDX)) return <App />; // reprise impossible : l'ancien CRM reste utilisable tel quel
-  const m = hash.match(/^#\/c\/([\w-]+)/);
-  if (m && lireJSON(DK(m[1]))) return <App key={m[1]} dossierId={m[1]} />;
-  return <Accueil />;
+  const m = hash.match(/^#\/c\/([\w-]+)(\/proposition)?/);
+  if (m && lireJSON(DK(m[1]))) return m[2] ? <App key={m[1]} dossierId={m[1]} /> : <Fiche360 key={m[1] + hash} id={m[1]} />;
+  if (hash.startsWith('#/clients')) return <Accueil />;
+  if (hash.startsWith('#/pipeline')) return <Pipeline />;
+  return <Dashboard />;
 }
 
 /* ============================ Formules ============================ */
@@ -1785,16 +1787,18 @@ function Comparaison({ s, onProposer }) {
 let DOSSIER_COURANT = null;
 const IDX = 'crm-v2-index';
 const DK = (id) => 'crm-v2-d-' + id;
+// Pipeline : Nouveau prospect → Rendez-vous → Proposition envoyée → Négociation → Gagné / Perdu (probabilité par défaut)
 const ETAPES = [
-  { id: 'a_contacter', label: 'À contacter', coul: '#64748b' },
-  { id: 'contacte', label: 'Contacté', coul: '#0369a1' },
-  { id: 'rdv', label: 'RDV fixé', coul: '#7c3aed' },
-  { id: 'proposition', label: 'Proposition envoyée', coul: '#b45309' },
-  { id: 'signe', label: 'Devis signé', coul: '#047857' },
-  { id: 'perdu', label: 'Perdu', coul: '#9ca3af' },
+  { id: 'a_contacter', label: 'Nouveau prospect', coul: '#64748b', proba: 10 },
+  { id: 'rdv', label: 'Rendez-vous', coul: '#7c3aed', proba: 30 },
+  { id: 'proposition', label: 'Proposition envoyée', coul: '#b45309', proba: 50 },
+  { id: 'negociation', label: 'Négociation', coul: '#0369a1', proba: 70 },
+  { id: 'signe', label: 'Gagné', coul: '#047857', proba: 100 },
+  { id: 'perdu', label: 'Perdu', coul: '#9ca3af', proba: 0 },
 ];
-const etapeDe = (id) => ETAPES.find(e => e.id === id) || ETAPES[0];
-const rangEtape = (id) => ETAPES.findIndex(e => e.id === id);
+const normEtape = (id) => (id === 'contacte' ? 'a_contacter' : ETAPES.some(e => e.id === id) ? id : 'a_contacter'); // ancienne étape « Contacté »
+const etapeDe = (id) => ETAPES.find(e => e.id === normEtape(id)) || ETAPES[0];
+const rangEtape = (id) => ETAPES.findIndex(e => e.id === normEtape(id));
 const lireJSON = (k) => { try { return JSON.parse(localStorage.getItem(k) || 'null'); } catch { return null; } };
 const ecrireJSON = (k, v) => localStorage.setItem(k, JSON.stringify(v)); // peut lever une erreur (mémoire pleine)
 const nouvelId = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
@@ -1812,9 +1816,18 @@ const montantsDe = (st) => {
   } catch { return { P: 0, M: 0, mois: 0 }; }
 };
 const entreeDe = (id, st, prev = {}) => {
-  const cl = st.client || {}, su = st.suivi || {}, m = montantsDe(st);
+  const cl = st.client || {}, su = st.suivi || {}, m = montantsDe(st), etape = normEtape(su.etape);
+  // devis signés : montants de la version signée (figée), pas de l'état modifié depuis
+  const signesListe = Object.entries(st.signes || {}).map(([numero, sg]) => { const sn = sg && sg.payload && lire(sg.payload);
+    return { numero, quand: sg.quand, titre: sn ? sn.d.titre : '', P: sn ? sn.d.P.ttc : m.P, M: sn ? sn.d.M.ttc : m.M, mois: sn ? (sn.d.mois || 0) : m.mois }; })
+    .sort((a, b) => (a.quand || '').localeCompare(b.quand || ''));
+  const chiffre = rangEtape(etape) >= rangEtape('proposition') || !!((st.choisi || {}).formule || ((st.choisi || {}).packs || []).length || Object.keys(st.envois || {}).length);
+  // montant estimé : saisi à la main, sinon le devis (seulement s'il a été chiffré pour ce client)
+  const estime = su.estime !== undefined && su.estime !== '' ? num(su.estime) : chiffre ? m.P + m.M * Math.max(1, m.mois || 0) : 0;
   return { ...prev, id, entreprise: cl.entreprise || 'Sans nom', responsable: cl.responsable || '', secteur: cl.secteur || '',
-    ville: villeDe(cl.adresse), telephone: cl.telephone || '', etape: su.etape || 'a_contacter',
+    signesListe, estime, proba: su.proba !== undefined && su.proba !== '' ? num(su.proba) : etapeDe(etape).proba,
+    gagneLe: su.gagneLe || (signesListe[0] || {}).quand || '', perduLe: su.perduLe || '', rdv: su.rdv || null,
+    ville: villeDe(cl.adresse), telephone: cl.telephone || '', etape,
     prochaine: su.prochaine || { date: '', action: '' }, numero: su.numero || '', signe: Object.keys(st.signes || {}).length > 0,
     montantP: m.P, montantM: m.M, mois: m.mois, chiffre: rangEtape(su.etape || 'a_contacter') >= rangEtape('proposition') || !!((st.choisi || {}).formule || ((st.choisi || {}).packs || []).length || Object.keys(st.envois || {}).length), cree: prev.cree || new Date().toISOString(), maj: new Date().toISOString(), archive: !!prev.archive };
 };
@@ -1875,7 +1888,7 @@ function initCRM() {
       const ancienNumero = `DEV-${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, '0')}${String(d.getDate()).padStart(2, '0')}-${(s1.client.entreprise || 'X').replace(/[^A-Za-z]/g, '').slice(0, 3).toUpperCase() || 'X'}`;
       const signes = Object.keys(s1.signes || {}), envois = Object.keys(s1.envois || {});
       const numero = signes[signes.length - 1] || envois[envois.length - 1] || ancienNumero;
-      s1.suivi = { etape: signes.length ? 'signe' : envois.length ? 'proposition' : 'rdv', prochaine: { date: signes.length ? '' : isoJour(), action: signes.length ? '' : 'Relancer pour la signature du devis' },
+      s1.suivi = { etape: signes.length ? 'signe' : 'proposition', prochaine: { date: signes.length ? '' : isoJour(), action: signes.length ? '' : 'Relancer pour la signature du devis' },
         historique: [{ date: new Date().toISOString(), type: 'auto', texte: 'Dossier repris de la première version du CRM (données inchangées).' }], numero };
       const avant = totauxDe(s1);
       const id = 'boulangerie';
@@ -1928,18 +1941,22 @@ function BandeauDossier({ s, set, toast, numero }) {
   const maj = (patch, ligne) => set(p => { const x = p.suivi || su; return { suivi: { ...x, ...patch,
     historique: ligne ? [...(x.historique || []), { date: new Date().toISOString(), ...ligne }] : (x.historique || []) } }; });
   const changerEtape = (e) => {
-    if (e === su.etape) return;
+    if (e === normEtape(su.etape)) return;
     let motif = '';
     if (e === 'perdu') { motif = prompt('Motif de la perte ? (prix, pas le moment, concurrent…)'); if (motif === null) return; }
-    maj({ etape: e, ...(e === 'perdu' ? { motif } : {}), ...(e === 'signe' || e === 'perdu' ? { prochaine: { date: '', action: '' } } : {}) },
+    maj({ etape: e, proba: undefined, ...(e === 'perdu' ? { motif, perduLe: new Date().toISOString() } : {}), ...(e === 'signe' ? { gagneLe: su.gagneLe || new Date().toISOString() } : {}), ...(e === 'signe' || e === 'perdu' ? { prochaine: { date: '', action: '' } } : {}) },
       { type: 'auto', texte: `Étape : ${etapeDe(e).label}${motif ? ' · ' + motif : ''}` });
   };
   const prochaine = su.prochaine || { date: '', action: '' };
   const setProchaine = (patch) => maj({ prochaine: { ...prochaine, ...patch } });
+  // fixer un rendez-vous fait passer un nouveau prospect en « Rendez-vous »
+  const majRdv = (patch) => { const r = { ...(su.rdv || {}), ...patch }; const avance = r.date && normEtape(su.etape) === 'a_contacter';
+    maj({ rdv: r, ...(avance ? { etape: 'rdv', proba: undefined } : {}), ...(r.date && !(su.prochaine || {}).date ? { prochaine: { date: r.date, action: 'Rendez-vous' } } : {}) },
+      avance ? { type: 'auto', texte: `Rendez-vous fixé le ${jourCourt(r.date)}` } : null); };
   const noter = () => { if (!texte.trim()) return; maj({}, { type, texte: texte.trim() }); setTexte(''); setHisto(true); toast('Échange noté.'); };
   const sig = (s.signes || {})[numero], env = (s.envois || {})[numero];
   const retard = prochaine.date && prochaine.date < isoJour();
-  const fini = su.etape === 'signe' || su.etape === 'perdu';
+  const fini = normEtape(su.etape) === 'signe' || su.etape === 'perdu';
   const avenant = () => {
     if (!confirm(`Le devis ${numero} est signé et reste tel quel.\n\nCréer un nouveau devis (nouveau numéro) pour proposer d'autres prestations à ce client ?`)) return;
     const idx = lireJSON(IDX); const n = numeroSuivant(idx); idx.compteur = (idx.compteur || 1) + 1; ecrireJSON(IDX, idx);
@@ -1956,7 +1973,7 @@ function BandeauDossier({ s, set, toast, numero }) {
     <div className="rounded-2xl border border-gray-200 bg-white p-4 shadow-sm">
       <div className="-mx-1 flex gap-1.5 overflow-x-auto px-1 pb-1">
         {ETAPES.map(e => {
-          const on = e.id === su.etape;
+          const on = e.id === normEtape(su.etape);
           return <button key={e.id} onClick={() => changerEtape(e.id)} className={'shrink-0 rounded-full px-3 py-1.5 text-[13px] font-semibold transition ' + (on ? 'text-white shadow-sm' : 'bg-gray-100 text-gray-600 hover:bg-gray-200')}
             style={on ? { background: e.coul } : {}}>{e.label}</button>;
         })}
@@ -1969,6 +1986,23 @@ function BandeauDossier({ s, set, toast, numero }) {
           <input type="date" value={prochaine.date} onChange={e => setProchaine({ date: e.target.value })} className={'rounded-lg border px-2 py-1.5 text-sm outline-none ' + (retard ? 'border-red-300 text-red-700' : 'border-gray-200')} />
           <button onClick={() => setProchaine({ date: plusJours(1) })} className="rounded-lg bg-gray-100 px-2.5 py-1.5 text-xs font-medium">Demain</button>
           <button onClick={() => setProchaine({ date: plusJours(7) })} className="rounded-lg bg-gray-100 px-2.5 py-1.5 text-xs font-medium">+1 sem.</button>
+        </div>
+      )}
+      {!fini && (
+        <div className="mt-2 flex flex-wrap items-center gap-2">
+          <span className="text-xs font-bold uppercase tracking-wider text-violet-700">Rendez-vous</span>
+          <input id="rdv-date" type="date" value={(su.rdv || {}).date || ''} onChange={e => majRdv({ date: e.target.value })} className="rounded-lg border border-gray-200 px-2 py-1.5 text-sm" />
+          <input type="time" value={(su.rdv || {}).heure || ''} onChange={e => majRdv({ heure: e.target.value })} className="rounded-lg border border-gray-200 px-2 py-1.5 text-sm" />
+          <input value={(su.rdv || {}).lieu || ''} onChange={e => majRdv({ lieu: e.target.value })} placeholder="Lieu (boutique, visio…)" className="min-w-[130px] flex-1 rounded-lg border border-gray-200 px-3 py-1.5 text-sm" />
+          {su.rdv && su.rdv.date && <button onClick={() => maj({ rdv: null })} className="text-xs text-gray-400 hover:text-red-600">Effacer</button>}
+        </div>
+      )}
+      {!fini && (
+        <div className="mt-2 flex flex-wrap items-center gap-2 text-sm">
+          <span className="text-xs font-bold uppercase tracking-wider text-gray-500">Affaire</span>
+          <label className="flex items-center gap-1">Probabilité <input type="number" min="0" max="100" value={su.proba ?? etapeDe(su.etape).proba} onChange={e => maj({ proba: e.target.value })} className="w-16 rounded-lg border border-gray-200 px-2 py-1 text-right" /> %</label>
+          <label className="flex items-center gap-1">Montant estimé <input type="number" min="0" value={su.estime ?? ''} placeholder={String(Math.round(entreeDe('x', s).estime))} onChange={e => maj({ estime: e.target.value })} className="w-28 rounded-lg border border-gray-200 px-2 py-1 text-right" /> €</label>
+          <span className="text-xs text-gray-400">vide = montant du devis</span>
         </div>
       )}
       <div className="mt-3 flex flex-wrap gap-2">
@@ -2010,7 +2044,7 @@ function Accueil() {
   const toast = (m) => { setMsg(m); setTimeout(() => setMsg(''), 4500); };
   const ecrire = (f) => { const x = lireJSON(IDX); f(x); ecrireJSON(IDX, x); recharger(); };
   const auj = isoJour();
-  const ds = idx.dossiers;
+  const ds = idx.dossiers.map(d => ({ ...d, etape: normEtape(d.etape) }));
   const actifs = ds.filter(d => !d.archive);
   const enCours = actifs.filter(d => !['signe', 'perdu'].includes(d.etape));
   const relances = enCours.filter(d => d.prochaine && d.prochaine.date && d.prochaine.date <= auj).sort((a, b) => a.prochaine.date.localeCompare(b.prochaine.date));
@@ -2091,11 +2125,11 @@ function Accueil() {
     </button>
   );
   return (
-    <div className="min-h-screen pb-28">
+    <Shell page="clients"><div className="min-h-screen pb-36 lg:pb-28">
       <div className="sticky top-0 z-30 border-b border-gray-200 bg-white/90 backdrop-blur" style={{ paddingTop: 'env(safe-area-inset-top)' }}>
         <div className="mx-auto flex max-w-5xl flex-wrap items-center gap-2 px-4 py-3 sm:px-6">
           <div className="mr-auto">
-            <h1 className="font-display text-xl font-bold leading-tight sm:text-2xl">Mes clients</h1>
+            <h1 className="font-display text-xl font-bold leading-tight sm:text-2xl">Clients</h1>
             <p className="text-xs text-gray-500">{vi.nom || 'CRM de prospection'}</p>
           </div>
           <button onClick={sauvegarder} className="rounded-xl border border-gray-200 bg-white px-3 py-2 text-sm font-medium">⤓ Sauvegarder</button>
@@ -2161,7 +2195,7 @@ function Accueil() {
         </div>
         <p className="text-center text-[11px] text-gray-400">Mémoire utilisée sur cet appareil : {(memoire / 1e6).toFixed(1).replace('.', ',')} Mo sur environ 5 Mo ({memPct} %) · modèle de tarifs : {idx.modeleSource || '—'}</p>
       </main>
-      <button onClick={() => setCreation(true)} className="fixed bottom-5 right-5 z-30 rounded-full bg-accent px-5 py-4 text-base font-semibold text-white shadow-xl sm:hidden" style={{ marginBottom: 'env(safe-area-inset-bottom)' }}>+ Nouveau client</button>
+      <button onClick={() => setCreation(true)} className="fixed bottom-20 right-5 z-30 rounded-full bg-accent px-5 py-4 text-base font-semibold text-white shadow-xl sm:hidden" style={{ marginBottom: 'env(safe-area-inset-bottom)' }}>+ Nouveau client</button>
       {creation && (
         <div className="fixed inset-0 z-50 flex items-end justify-center bg-gray-900/40 sm:items-center" onClick={() => setCreation(false)}>
           <div className="w-full max-w-lg rounded-t-3xl bg-white p-5 shadow-2xl sm:rounded-3xl" onClick={e => e.stopPropagation()} style={{ paddingBottom: 'calc(1.25rem + env(safe-area-inset-bottom))' }}>
@@ -2185,7 +2219,319 @@ function Accueil() {
         </div>
       )}
       <Toast msg={msg} />
+    </div></Shell>
+  );
+}
+
+/* ============================ Phase 1 : tableau de bord, pipeline, fiche client 360° ============================ */
+const PERIODES = [['mois', 'Ce mois'], ['trimestre', 'Ce trimestre'], ['annee', 'Cette année'], ['tout', 'Tout']];
+const debutPeriode = (p) => { const d = new Date(); if (p === 'mois') return new Date(d.getFullYear(), d.getMonth(), 1);
+  if (p === 'trimestre') return new Date(d.getFullYear(), Math.floor(d.getMonth() / 3) * 3, 1); if (p === 'annee') return new Date(d.getFullYear(), 0, 1); return new Date(0); };
+const dansPeriode = (iso, p) => !!iso && new Date(iso) >= debutPeriode(p);
+const valeurContrat = (x) => x.P + x.M * Math.max(1, x.mois || 0); // création + mensuel sur la durée d'engagement
+const OUVERTES = ['a_contacter', 'rdv', 'proposition', 'negociation'];
+
+// Remet l'index à jour depuis les dossiers (montants signés, probabilités…)
+function rafraichirIndex() {
+  const idx = lireJSON(IDX); if (!idx) return null;
+  let change = false;
+  idx.dossiers = idx.dossiers.map(e => { const st = lireJSON(DK(e.id)); if (!st) return e; const n = entreeDe(e.id, st, e);
+    const a = JSON.stringify({ ...e, maj: 0 }), b = JSON.stringify({ ...n, maj: 0 }); if (a === b) return e; change = true; return { ...n, maj: e.maj }; });
+  if (change) { try { ecrireJSON(IDX, idx); } catch {} }
+  return idx;
+}
+
+// Change l'étape d'un dossier depuis le pipeline (glisser-déposer ou flèches)
+function changerEtapeDossier(id, etape) {
+  const st = lireJSON(DK(id)); if (!st) return false;
+  const su = st.suivi || {};
+  if (normEtape(su.etape) === etape) return false;
+  let motif = '';
+  if (etape === 'perdu') { motif = prompt('Motif de la perte ? (prix, pas le moment, concurrent…)'); if (motif === null) return false; }
+  if (etape === 'signe' && !Object.keys(st.signes || {}).length && !confirm('Marquer cette affaire comme gagnée sans devis signé électroniquement ?')) return false;
+  st.suivi = { ...su, etape, proba: undefined, ...(etape === 'perdu' ? { motif, perduLe: new Date().toISOString() } : {}), ...(etape === 'signe' ? { gagneLe: su.gagneLe || new Date().toISOString() } : {}),
+    ...(etape === 'signe' || etape === 'perdu' ? { prochaine: { date: '', action: '' } } : {}),
+    historique: [...(su.historique || []), { date: new Date().toISOString(), type: 'auto', texte: `Étape : ${etapeDe(etape).label}${motif ? ' · ' + motif : ''}` }] };
+  sauverDossier(id, st);
+  return true;
+}
+
+// Indicateurs, tous calculés à partir des dossiers
+function indicateurs(ds, periode) {
+  const actifs = ds.filter(d => !d.archive);
+  const signes = ds.flatMap(d => (d.signesListe || []).map(x => ({ ...x, dossier: d })));
+  const signesP = signes.filter(x => dansPeriode(x.quand, periode));
+  const gagnes = ds.filter(d => d.etape === 'signe' && dansPeriode(d.gagneLe || ((d.signesListe || [])[0] || {}).quand, periode)).length;
+  const perdus = ds.filter(d => d.etape === 'perdu' && dansPeriode(d.perduLe || d.maj, periode)).length;
+  const ouvertes = actifs.filter(d => OUVERTES.includes(d.etape));
+  const enAttente = actifs.filter(d => ['proposition', 'negociation'].includes(d.etape));
+  const auj = isoJour();
+  return {
+    caSigne: signesP.reduce((a, x) => a + valeurContrat(x), 0),
+    caSigneP: signesP.reduce((a, x) => a + x.P, 0), caSigneM: signesP.reduce((a, x) => a + x.M, 0), nbSignes: signesP.length,
+    mrr: ds.filter(d => d.etape === 'signe').reduce((a, d) => a + (d.signesListe || []).reduce((b, x) => b + x.M, 0), 0),
+    enAttente: enAttente.length, montantAttente: enAttente.reduce((a, d) => a + (d.estime || 0), 0),
+    prospects: actifs.filter(d => ['a_contacter', 'rdv'].includes(d.etape)).length,
+    conversion: gagnes + perdus ? Math.round(gagnes / (gagnes + perdus) * 100) : null, gagnes, perdus,
+    pondere: ouvertes.reduce((a, d) => a + (d.estime || 0) * (d.proba ?? 0) / 100, 0),
+    moyen: signesP.length ? signesP.reduce((a, x) => a + valeurContrat(x), 0) / signesP.length : 0,
+    actions: actifs.filter(d => OUVERTES.includes(d.etape) && d.prochaine && d.prochaine.date).sort((a, b) => a.prochaine.date.localeCompare(b.prochaine.date)).slice(0, 8),
+    rdvs: actifs.filter(d => d.rdv && d.rdv.date && d.rdv.date >= auj).sort((a, b) => (a.rdv.date + a.rdv.heure).localeCompare(b.rdv.date + b.rdv.heure)).slice(0, 5),
+  };
+}
+
+// Navigation latérale (ordinateur) et barre du bas (téléphone)
+const NAV = [['#/', 'Tableau de bord', '◧'], ['#/clients', 'Clients', '☰'], ['#/pipeline', 'Pipeline', '⇶']];
+const NAV_BIENTOT = [['Commandes', 2], ['Factures', 2], ['Abonnements', 3], ['Dépenses', 3], ['Statistiques', 3]];
+function Shell({ page, children }) {
+  const vi = vendeurInfo((lireJSON(IDX) || {}).vendeur || {});
+  const actif = (h) => (h === '#/' ? page === 'dashboard' : h === '#/clients' ? page === 'clients' : page === 'pipeline');
+  return (
+    <div className="min-h-screen lg:pl-60">
+      <aside className="fixed inset-y-0 left-0 z-40 hidden w-60 flex-col border-r border-gray-200 bg-white px-3 py-5 lg:flex">
+        <p className="px-3 font-display text-lg font-bold leading-tight">CRM commercial</p>
+        <p className="truncate px-3 text-xs text-gray-500">{vi.nom}</p>
+        <nav className="mt-6 space-y-1">
+          {NAV.map(([h, l, i]) => <a key={h} href={h} className={'flex items-center gap-3 rounded-xl px-3 py-2.5 text-[15px] font-semibold ' + (actif(h) ? 'bg-ink text-white' : 'text-gray-700 hover:bg-gray-100')}><span className="w-5 text-center">{i}</span>{l}</a>)}
+        </nav>
+        <p className="mt-6 px-3 text-[11px] font-bold uppercase tracking-wider text-gray-400">Bientôt</p>
+        <div className="mt-1 space-y-0.5">
+          {NAV_BIENTOT.map(([l, ph]) => <p key={l} className="flex items-center justify-between rounded-xl px-3 py-2 text-sm text-gray-400">{l}<span className="rounded-full bg-gray-100 px-2 py-0.5 text-[10px] font-semibold">phase {ph}</span></p>)}
+        </div>
+      </aside>
+      {children}
+      <nav className="fixed inset-x-0 bottom-0 z-40 grid grid-cols-3 border-t border-gray-200 bg-white/95 backdrop-blur lg:hidden" style={{ paddingBottom: 'env(safe-area-inset-bottom)' }}>
+        {NAV.map(([h, l, i]) => <a key={h} href={h} className={'flex flex-col items-center py-2 text-[11px] font-semibold ' + (actif(h) ? 'text-ink' : 'text-gray-400')}><span className="text-lg leading-none">{i}</span>{l}</a>)}
+      </nav>
     </div>
+  );
+}
+
+function Periode({ value, onChange }) {
+  return <div className="flex rounded-xl bg-gray-100 p-1">{PERIODES.map(([v, l]) => <button key={v} onClick={() => onChange(v)} className={'rounded-lg px-3 py-1.5 text-[13px] font-semibold ' + (value === v ? 'bg-white text-ink shadow-sm' : 'text-gray-500')}>{l}</button>)}</div>;
+}
+function Tuile({ titre, val, sous, cls = 'bg-white', href, bientot }) {
+  const corps = <>
+    <p className="text-[11px] font-bold uppercase tracking-wider opacity-70">{titre}</p>
+    <p className="tabular font-display text-[26px] font-bold leading-tight">{bientot ? '—' : val}</p>
+    <p className="text-xs opacity-75">{bientot ? `Arrive avec la ${bientot}` : sous}</p>
+  </>;
+  const c = 'block rounded-2xl p-4 ring-1 ring-black/5 transition ' + (bientot ? 'bg-gray-50 text-gray-400' : cls + (href ? ' hover:shadow-md' : ''));
+  return href && !bientot ? <a href={href} className={c}>{corps}</a> : <div className={c}>{corps}</div>;
+}
+
+function Dashboard() {
+  const [idx] = useState(() => rafraichirIndex() || lireJSON(IDX));
+  const [periode, setPeriode] = useState(() => { try { return localStorage.getItem('crm-periode') || 'mois'; } catch { return 'mois'; } });
+  const choisir = (p) => { setPeriode(p); try { localStorage.setItem('crm-periode', p); } catch {} };
+  const ds = idx.dossiers.map(d => ({ ...d, etape: normEtape(d.etape) }));
+  const k = indicateurs(ds, periode), auj = isoJour();
+  const lib = PERIODES.find(x => x[0] === periode)[1].toLowerCase();
+  return (
+    <Shell page="dashboard">
+      <div className="mx-auto max-w-6xl space-y-6 px-4 pb-28 pt-6 sm:px-6">
+        <div className="flex flex-wrap items-end justify-between gap-3">
+          <div><h1 className="font-display text-2xl font-bold sm:text-3xl">Tableau de bord</h1><p className="text-sm text-gray-500">Calculé à partir de vos dossiers · {fmtDate(new Date())}</p></div>
+          <Periode value={periode} onChange={choisir} />
+        </div>
+        <section>
+          <p className="mb-2 text-xs font-bold uppercase tracking-wider text-gray-500">L'essentiel</p>
+          <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+            <Tuile titre="1 · Vendu (CA signé)" val={eur(k.caSigne)} sous={`${k.nbSignes} devis signé(s) ${lib} · ${eur(k.caSigneP)} + ${eur(k.caSigneM)}/mois`} cls="bg-emerald-50 text-emerald-900" href="#/pipeline" />
+            <Tuile titre="2 · Encaissé" bientot="facturation (phase 2)" />
+            <Tuile titre="3 · Ce qu'on me doit" bientot="facturation (phase 2)" />
+            <Tuile titre="4 · Abonnements (MRR)" val={eur(k.mrr) + '/mois'} sous={`soit ${eur(k.mrr * 12)} par an · clients gagnés`} cls="bg-sky-50 text-sky-900" />
+            <Tuile titre="5 · Encore à signer" val={eur(k.montantAttente)} sous={`${k.enAttente} devis en attente · pondéré ${eur(k.pondere)}`} cls="bg-amber-50 text-amber-900" href="#/pipeline" />
+            <Tuile titre="6 · À livrer" bientot="gestion des commandes (phase 2)" />
+            <Tuile titre="7 · Ce que ça coûte" bientot="saisie des dépenses (phase 3)" />
+            <Tuile titre="8 · Rentabilité" bientot="saisie des dépenses (phase 3)" />
+          </div>
+        </section>
+        <section className="grid gap-3 sm:grid-cols-3">
+          <Tuile titre="Prospects" val={k.prospects} sous="nouveaux ou en rendez-vous" href="#/pipeline" />
+          <Tuile titre="Taux de conversion" val={k.conversion === null ? '—' : k.conversion + ' %'} sous={k.conversion === null ? `aucune affaire conclue ${lib}` : `${k.gagnes} gagnée(s), ${k.perdus} perdue(s) ${lib}`} />
+          <Tuile titre="Contrat moyen" val={k.moyen ? eur(k.moyen) : '—'} sous="création + mensuel sur l'engagement" />
+        </section>
+        <section className="grid gap-4 lg:grid-cols-2">
+          <div className="rounded-2xl bg-white p-4 ring-1 ring-black/5">
+            <p className="font-semibold">Prochaines actions commerciales</p>
+            {k.actions.length ? <ul className="mt-2 divide-y divide-gray-100">{k.actions.map(d => {
+              const r = d.prochaine.date < auj, j = d.prochaine.date === auj;
+              return <li key={d.id}><a href={'#/c/' + d.id} className="flex items-center justify-between gap-3 py-2.5 hover:bg-gray-50">
+                <span className="min-w-0"><span className="block truncate font-medium">{d.entreprise}</span><span className="block truncate text-[13px] text-gray-500">{d.prochaine.action || 'Action à préciser'}</span></span>
+                <span className={'shrink-0 text-[13px] font-semibold ' + (r ? 'text-red-600' : j ? 'text-amber-700' : 'text-gray-500')}>{r ? '⚠ ' : ''}{j ? "Aujourd'hui" : jourCourt(d.prochaine.date)}</span></a></li>; })}</ul>
+              : <p className="mt-2 text-sm text-gray-500">Aucune action planifiée. Ouvrez un dossier pour fixer une prochaine action.</p>}
+          </div>
+          <div className="rounded-2xl bg-white p-4 ring-1 ring-black/5">
+            <p className="font-semibold">Rendez-vous à venir</p>
+            {k.rdvs.length ? <ul className="mt-2 divide-y divide-gray-100">{k.rdvs.map(d => (
+              <li key={d.id}><a href={'#/c/' + d.id} className="flex items-center justify-between gap-3 py-2.5 hover:bg-gray-50">
+                <span className="min-w-0"><span className="block truncate font-medium">{d.entreprise}</span><span className="block truncate text-[13px] text-gray-500">{d.rdv.lieu || d.ville || ''}</span></span>
+                <span className="shrink-0 text-[13px] font-semibold text-violet-700">{d.rdv.date === auj ? "Aujourd'hui" : jourCourt(d.rdv.date)}{d.rdv.heure ? ' · ' + d.rdv.heure : ''}</span></a></li>))}</ul>
+              : <p className="mt-2 text-sm text-gray-500">Aucun rendez-vous à venir. Fixez-en un depuis la fiche d'un client.</p>}
+          </div>
+        </section>
+        <p className="text-[12px] text-gray-400">« Vendu » compte les devis signés sur la période : la création, plus le mensuel sur la durée d'engagement. Ce n'est pas de l'argent encaissé : l'encaissement arrive avec la facturation (phase 2).</p>
+      </div>
+    </Shell>
+  );
+}
+
+function Pipeline() {
+  const [idx, setIdx] = useState(() => rafraichirIndex() || lireJSON(IDX));
+  const [glisse, setGlisse] = useState(null), [survol, setSurvol] = useState(null);
+  const ds = idx.dossiers.filter(d => !d.archive).map(d => ({ ...d, etape: normEtape(d.etape) }));
+  const deplacer = (id, etape) => { if (changerEtapeDossier(id, etape)) setIdx(rafraichirIndex()); };
+  return (
+    <Shell page="pipeline">
+      <div className="px-4 pb-28 pt-6 sm:px-6">
+        <div className="mx-auto max-w-6xl">
+          <h1 className="font-display text-2xl font-bold sm:text-3xl">Pipeline commercial</h1>
+          <p className="text-sm text-gray-500">Glissez une carte vers une autre colonne (ou utilisez les flèches) pour changer son étape.</p>
+        </div>
+        <div className="mt-4 flex snap-x gap-3 overflow-x-auto pb-4">
+          {ETAPES.map((e, i) => {
+            const col = ds.filter(d => d.etape === e.id);
+            const total = col.reduce((a, d) => a + (d.estime || 0), 0);
+            return (
+              <div key={e.id} onDragOver={ev => { ev.preventDefault(); setSurvol(e.id); }} onDragLeave={() => setSurvol(null)}
+                onDrop={ev => { ev.preventDefault(); setSurvol(null); if (glisse) deplacer(glisse, e.id); setGlisse(null); }}
+                className={'w-[270px] shrink-0 snap-start rounded-2xl p-2 transition lg:w-auto lg:min-w-[190px] lg:flex-1 lg:shrink ' + (survol === e.id ? 'bg-gray-200' : 'bg-gray-100')}>
+                <div className="flex items-baseline justify-between px-2 py-1.5">
+                  <p className="flex items-center gap-2 text-sm font-bold"><span className="h-2.5 w-2.5 rounded-full" style={{ background: e.coul }} />{e.label} <span className="font-normal text-gray-500">{col.length}</span></p>
+                  <p className="tabular text-xs text-gray-500">{total ? eur(total) : ''}</p>
+                </div>
+                <div className="space-y-2">
+                  {col.map(d => (
+                    <div key={d.id} draggable onDragStart={() => setGlisse(d.id)} onDragEnd={() => setGlisse(null)} className="cursor-grab rounded-xl bg-white p-3 shadow-sm ring-1 ring-black/5 active:cursor-grabbing">
+                      <a href={'#/c/' + d.id} className="block">
+                        <p className="truncate font-semibold">{d.entreprise}</p>
+                        <p className="truncate text-xs text-gray-500">{[d.secteur, d.ville].filter(Boolean).join(' · ') || '—'}</p>
+                        <p className="tabular mt-1.5 text-[13px] font-semibold">{d.estime ? eur(d.estime) : 'Montant à estimer'} <span className="font-normal text-gray-500">· {d.proba ?? e.proba} %</span></p>
+                        {d.prochaine && d.prochaine.date && OUVERTES.includes(d.etape) && <p className={'mt-0.5 truncate text-xs ' + (d.prochaine.date < isoJour() ? 'font-semibold text-red-600' : 'text-gray-500')}>⏰ {jourCourt(d.prochaine.date)} · {d.prochaine.action}</p>}
+                      </a>
+                      <div className="mt-2 flex justify-between">
+                        <button disabled={i === 0} onClick={() => deplacer(d.id, ETAPES[i - 1].id)} className="rounded-lg px-2 py-1 text-sm text-gray-500 hover:bg-gray-100 disabled:opacity-20" aria-label="Étape précédente">←</button>
+                        <button disabled={i === ETAPES.length - 1} onClick={() => deplacer(d.id, ETAPES[i + 1].id)} className="rounded-lg px-2 py-1 text-sm text-gray-500 hover:bg-gray-100 disabled:opacity-20" aria-label="Étape suivante">→</button>
+                      </div>
+                    </div>
+                  ))}
+                  {!col.length && <p className="px-2 py-4 text-center text-xs text-gray-400">Aucun dossier</p>}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    </Shell>
+  );
+}
+
+// Fiche client 360°
+function Fiche360({ id }) {
+  const [st, setSt] = useState(() => load(lireJSON(DK(id))));
+  const [msg, setMsg] = useState(''), [ouvert, setOuvert] = useState({ relation: true, devis: true });
+  const [contact, setContact] = useState({ nom: '', role: '', tel: '' });
+  const toast = (m) => { setMsg(m); setTimeout(() => setMsg(''), 4000); };
+  const set = (patch) => setSt(p => ({ ...p, ...(typeof patch === 'function' ? patch(p) : patch) }));
+  useEffect(() => { try { const r = sauverDossier(id, st); if (r && r !== st && Object.keys(r.signes || {}).length !== Object.keys(st.signes || {}).length) setSt(r); } catch { toast('Mémoire pleine : enregistrement impossible.'); } }, [st]);
+  FRANCHISE = num(st.tva) === 0;
+  const cl = st.client || {}, su = st.suivi || {}, e = entreeDe(id, st), et = etapeDe(e.etape);
+  const signesL = e.signesListe || [];
+  const caSigne = signesL.reduce((a, x) => a + valeurContrat(x), 0), mrr = signesL.reduce((a, x) => a + x.M, 0);
+  const numero = su.numero || '';
+  const env = (st.envois || {})[numero], sig = (st.signes || {})[numero];
+  const prop = '#/c/' + id + '/proposition';
+  // une seule action principale, selon la situation
+  const action = (() => {
+    if (e.etape === 'signe') return sig ? { l: '+ Nouveau devis (avenant) depuis la proposition', h: prop } : { l: 'Ouvrir la proposition', h: prop };
+    if (e.etape === 'perdu') return { l: 'Relancer ce prospect', f: () => { changerEtapeDossier(id, 'a_contacter') && setSt(load(lireJSON(DK(id)))); } };
+    if (env && !sig) return { l: '📞 Relancer pour la signature', h: cl.telephone ? 'tel:' + cl.telephone.replace(/\s/g, '') : prop };
+    if (e.etape === 'a_contacter') return { l: cl.telephone ? '📞 Appeler pour fixer un rendez-vous' : 'Fixer un rendez-vous', h: cl.telephone ? 'tel:' + cl.telephone.replace(/\s/g, '') : undefined, f: cl.telephone ? undefined : () => { setOuvert(o => ({ ...o, relation: true })); document.getElementById('rdv-date')?.focus(); } };
+    if (e.etape === 'rdv') return { l: 'Préparer la proposition', h: prop };
+    return { l: '✍ Faire signer le devis', h: prop };
+  })();
+  // appelée comme une fonction (pas <Section/>) pour que les champs gardent le focus
+  const section = (k, n, titre, children, bientot) => (
+    <div className="rounded-2xl bg-white ring-1 ring-black/5">
+      <button onClick={() => setOuvert(o => ({ ...o, [k]: !o[k] }))} className="flex w-full items-center gap-3 px-4 py-3.5 text-left">
+        <span className="grid h-7 w-7 place-items-center rounded-full bg-gray-100 text-sm font-bold">{n}</span>
+        <span className="flex-1 font-semibold">{titre}</span>
+        {bientot && <span className="rounded-full bg-gray-100 px-2 py-0.5 text-[11px] font-semibold text-gray-500">{bientot}</span>}
+        <span className="text-gray-400">{ouvert[k] ? '▴' : '▾'}</span>
+      </button>
+      {ouvert[k] && <div className="border-t border-gray-100 px-4 py-4">{children}</div>}
+    </div>
+  );
+  const contacts = su.contacts || [];
+  const ajouterContact = () => { if (!contact.nom.trim()) return; set(p => ({ suivi: { ...(p.suivi || {}), contacts: [...((p.suivi || {}).contacts || []), { ...contact, nom: contact.nom.trim() }] } })); setContact({ nom: '', role: '', tel: '' }); };
+  const lienSigne = (numeroS, sg) => sg && sg.payload ? `#signe=${sg.payload}.${LZString.compressToEncodedURIComponent(JSON.stringify({ nom: sg.nom, traits: sg.traits, quand: sg.quand }))}` : null;
+  return (
+    <Shell page="clients">
+      <div className="mx-auto max-w-4xl space-y-4 px-4 pb-28 pt-5 sm:px-6">
+        <a href="#/clients" className="text-sm font-medium text-gray-500 hover:text-ink">← Clients</a>
+        <div className="rounded-3xl bg-white p-5 ring-1 ring-black/5">
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div className="min-w-0">
+              <h1 className="font-display text-2xl font-bold leading-tight sm:text-3xl">{cl.entreprise || 'Sans nom'}</h1>
+              <p className="text-sm text-gray-500">{[cl.responsable, fmtTel(cl.telephone), cl.email, villeDe(cl.adresse)].filter(Boolean).join(' · ') || 'Coordonnées à compléter'}</p>
+            </div>
+            <span className="rounded-full px-3 py-1 text-xs font-bold text-white" style={{ background: et.coul }}>{et.label}</span>
+          </div>
+          <div className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-4">
+            {[['CA signé', caSigne ? eur(caSigne) : '—'], ['Encaissé', '— (phase 2)'], ['Solde à recevoir', '— (phase 2)'], ['Abonnements actifs', mrr ? eur(mrr) + '/mois' : '—']].map(([l, v]) => (
+              <div key={l} className="rounded-xl bg-gray-50 px-3 py-2"><p className="text-[11px] font-bold uppercase tracking-wider text-gray-500">{l}</p><p className="tabular font-semibold">{v}</p></div>
+            ))}
+          </div>
+          {action.h ? <a href={action.h} className="mt-4 block rounded-xl bg-accent py-3 text-center text-[15px] font-semibold text-white">{action.l}</a>
+            : <button onClick={action.f} className="mt-4 w-full rounded-xl bg-accent py-3 text-[15px] font-semibold text-white">{action.l}</button>}
+        </div>
+
+        {section('relation', '1', 'Relation commerciale', <>
+          <BandeauDossier s={st} set={set} toast={toast} numero={numero} />
+          <div className="mt-4">
+            <p className="text-sm font-semibold">Contacts</p>
+            <ul className="mt-1 text-sm">
+              {cl.responsable && <li className="py-1">{cl.responsable} <span className="text-gray-500">· contact principal{cl.telephone ? ' · ' + fmtTel(cl.telephone) : ''}</span></li>}
+              {contacts.map((x, i) => <li key={i} className="flex items-center gap-2 py-1"><span>{x.nom} <span className="text-gray-500">{[x.role, fmtTel(x.tel)].filter(Boolean).map(v => '· ' + v).join(' ')}</span></span>
+                <button onClick={() => set(p => ({ suivi: { ...p.suivi, contacts: contacts.filter((_, j) => j !== i) } }))} className="ml-auto text-xs text-gray-400 hover:text-red-600">Retirer</button></li>)}
+            </ul>
+            <div className="mt-2 flex flex-wrap gap-2">
+              <input value={contact.nom} onChange={ev => setContact({ ...contact, nom: ev.target.value })} placeholder="Nom" className="min-w-[120px] flex-1 rounded-lg border border-gray-200 px-3 py-1.5 text-sm" />
+              <input value={contact.role} onChange={ev => setContact({ ...contact, role: ev.target.value })} placeholder="Rôle (associé, comptable…)" className="min-w-[120px] flex-1 rounded-lg border border-gray-200 px-3 py-1.5 text-sm" />
+              <input value={contact.tel} onChange={ev => setContact({ ...contact, tel: ev.target.value })} placeholder="Téléphone" inputMode="tel" className="w-36 rounded-lg border border-gray-200 px-3 py-1.5 text-sm" />
+              <button onClick={ajouterContact} className="rounded-lg bg-gray-100 px-3 py-1.5 text-sm font-semibold">+ Ajouter</button>
+            </div>
+            <p className="mt-3 text-xs text-gray-500">Fiche complète (adresse, email, questionnaire de découverte) : <a href={prop} className="underline">ouvrir la proposition</a>.</p>
+          </div>
+        </>)}
+
+        {section('devis', '2', 'Devis et contrats', <>
+          <div className="space-y-2 text-sm">
+            <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl bg-gray-50 px-3 py-2.5">
+              <span><b>Devis en cours N° {numero}</b> · {e.chiffre && (e.montantP || e.montantM) ? [e.montantP > 0 && eur(e.montantP), e.montantM > 0 && eur(e.montantM) + '/mois'].filter(Boolean).join(' + ') : 'pas encore chiffré'}
+                <span className="text-gray-500"> · {sig ? 'signé' : env ? `lien envoyé le ${jourCourt(env.date)}` : 'non envoyé'}</span></span>
+              <a href={prop} className="rounded-lg bg-ink px-3 py-1.5 font-semibold text-white">Ouvrir</a>
+            </div>
+            {signesL.length > 0 && <p className="pt-2 text-xs font-bold uppercase tracking-wider text-gray-500">Contrats signés</p>}
+            {signesL.map(x => { const h = lienSigne(x.numero, (st.signes || {})[x.numero]); return (
+              <div key={x.numero} className="flex flex-wrap items-center justify-between gap-2 rounded-xl bg-emerald-50 px-3 py-2.5 text-emerald-900">
+                <span>✓ <b>{x.numero}</b>{x.titre ? ' · ' + x.titre : ''} · {[x.P > 0 && eur(x.P), x.M > 0 && eur(x.M) + '/mois'].filter(Boolean).join(' + ')} · signé le {jourCourt(x.quand)}</span>
+                {h && <a href={h} className="rounded-lg bg-white px-3 py-1.5 font-semibold ring-1 ring-emerald-200">Voir le devis signé</a>}
+              </div>); })}
+            <p className="text-xs text-gray-500">Le suivi des versions et de l'acceptation de chaque devis est en place (empreinte et signature). La version détaillée arrive en phase 2.</p>
+          </div>
+        </>)}
+        {section('commandes', '3', 'Commandes et production', <p className="text-sm text-gray-500">Création d'une commande à partir d'un devis signé, tâches, livraison, site internet et réseaux sociaux : en phase 2.</p>, 'phase 2')}
+        {section('factures', '4', 'Factures et paiements', <p className="text-sm text-gray-500">Factures numérotées, acomptes, paiements, avoirs et soldes : en phase 2. Un devis signé n'est jamais compté comme encaissé.</p>, 'phase 2')}
+        {section('histo', '5', 'Historique et documents', <>
+          <ul className="max-h-80 space-y-1.5 overflow-y-auto text-[13px]">
+            {[...(su.historique || [])].reverse().map((h, i) => <li key={i} className="flex gap-2"><span className="w-20 shrink-0 text-gray-400">{jourCourt(h.date)}</span><span className={h.type === 'auto' ? 'text-gray-500' : ''}>{TYPES_ECHANGE[h.type] || ''} {h.texte}</span></li>)}
+          </ul>
+        </>)}
+      </div>
+      <Toast msg={msg} />
+    </Shell>
   );
 }
 
@@ -2342,7 +2688,7 @@ function App({ dossierId }) {
         <main className="mx-auto max-w-5xl space-y-4 px-4 pb-32 pt-6 sm:px-6">
           <div className="flex flex-wrap items-end justify-between gap-3 pb-2">
             <div>
-              {dossierId && <a href="#/" className="mb-1 inline-block text-sm font-medium text-gray-500 hover:text-ink">← Mes clients</a>}
+              {dossierId && <a href={'#/c/' + dossierId} className="mb-1 inline-block text-sm font-medium text-gray-500 hover:text-ink">← Fiche client</a>}
               <h1 className="font-display text-2xl font-semibold sm:text-3xl">{dossierId ? (s.client.entreprise || 'Nouveau client') : 'Proposition commerciale'}</h1>
               <p className="text-sm text-gray-500">{dossierId ? `Dossier client · devis N° ${numero} · enregistrement automatique` : 'Enregistrement automatique sur cet appareil.'}</p>
             </div>
