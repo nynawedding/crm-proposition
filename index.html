@@ -240,7 +240,7 @@ const DEFAULTS = {
   inclus: "Hébergement sécurisé et sauvegardes\nMises à jour de sécurité\nSupport par téléphone et email (réponse sous 48 h ouvrées)\nAccès aux statistiques",
   paiement: "Acompte à la signature, solde à la mise en ligne.\nAbonnements mensuels payables par prélèvement ou virement en début de mois.",
   validite: 30,
-  vendeur: { nom: '', societe: '', telephone: '', email: '', siret: '' },
+  vendeur: { civilite: 'M.', nom: '', societe: '', statut: 'Entrepreneur individuel (EI)', telephone: '', email: '', siret: '' },
 };
 
 /* ============================ Utilitaires ============================ */
@@ -389,6 +389,21 @@ const compress = (file, max = 1400, q = 0.82) => new Promise((resolve, reject) =
   };
   r.readAsDataURL(file);
 });
+
+// Coordonnées du prestataire, mises en forme : « M. Abdel Hafid FEDAOUCHE », « 06 12 52 09 77 », email en minuscules
+const fmtNom = (n) => { const m = (n || '').trim().split(/\s+/).filter(Boolean); if (!m.length) return '';
+  const fin = m.pop(); return [...m.map(w => w[0].toUpperCase() + w.slice(1).toLowerCase()), fin.toUpperCase()].join(' '); };
+const fmtTel = (x) => { const d = (x || '').replace(/\D/g, ''); return d.length === 10 ? d.replace(/(\d{2})(?=\d)/g, '$1 ') : (x || ''); };
+const vendeurInfo = (v = {}) => {
+  const a = (v.societe || '').trim(), b = (v.nom || '').trim(), al = a.toLowerCase(), bl = b.toLowerCase();
+  // société = nom de la personne (entrepreneur individuel) : on n'affiche le nom qu'une fois, le plus complet
+  const meme = a && b ? (al.includes(bl) ? a : bl.includes(al) ? b : null) : (a || b);
+  const civ = (v.civilite ?? 'M.').trim();
+  const personne = fmtNom(meme || b);
+  return { nom: personne ? (civ ? civ + ' ' : '') + personne : '', societe: meme ? '' : a, statut: (v.statut ?? 'Entrepreneur individuel (EI)').trim(),
+    tel: fmtTel(v.telephone), email: (v.email || '').trim().toLowerCase(),
+    siret: (v.siret || '').replace(/\D/g, '').replace(/^(\d{3})(\d{3})(\d{3})(\d{5})$/, '$1 $2 $3 $4') };
+};
 
 const waNumber = (tel) => {
   let d = (tel || '').replace(/[^\d+]/g, '');
@@ -673,10 +688,23 @@ function buildText(s, c, numero) {
   if (!kombi.length && c.economie > 0.5) L.push(`Remise incluse : ${eur(c.economie)}${xTTC()} d'économie${c.mois ? ` sur ${c.mois} mois` : ''}${formule ? ' par rapport aux mêmes prestations à la carte' : ''}.`);
   if (!kombi.length) L.push(`Total ${c.mois ? 'sur ' + c.mois + ' mois' : 'du 1er mois'} : ${eur(c.totalTTC)}${FRANCHISE ? ' net à payer' : ' TTC'}.`);
   L.push(`Offre valable jusqu'au ${fmtDate(addDays(today(), num(s.validite)))}.`);
-  if (s.visuels.demoUrl) L.push('Démonstration : ' + s.visuels.demoUrl);
   const v = s.vendeur;
-  if (v.nom || v.telephone) { L.push(''); L.push([v.nom, v.societe, v.telephone, v.email].filter(Boolean).join(' · ')); }
+  const vi = vendeurInfo(v);
+  if (vi.nom || vi.tel) { L.push(''); L.push([vi.nom, vi.societe, vi.tel, vi.email].filter(Boolean).join(' · ')); }
   return L.join('\n');
+}
+
+function BlocVendeur({ v, className = '', fort }) {
+  const vi = vendeurInfo(v);
+  return (
+    <div className={className}>
+      {vi.societe && <p className={fort ? 'text-base font-semibold text-ink' : 'font-medium'}>{vi.societe}</p>}
+      {vi.nom && <p className={!vi.societe && fort ? 'text-base font-semibold text-ink' : !vi.societe ? 'font-medium' : ''}>{vi.nom}</p>}
+      {vi.statut && <p className="text-gray-600">{vi.statut}</p>}
+      {(vi.tel || vi.email) && <p className="text-gray-600">{[vi.tel, vi.email].filter(Boolean).join(' · ')}</p>}
+      {vi.siret && <p className="text-gray-500">SIRET {vi.siret}</p>}
+    </div>
+  );
 }
 
 function Check({ className = '' }) {
@@ -799,6 +827,12 @@ function LigneMois({ p, on, fort, prix, onToggle, lecture, suffixe = '' }) {
 }
 
 function Proposal({ s, c, cTous, numero, onClose, toast, onExclu, onChoix, onDevis, onOption }) {
+  // la signature porte sur le devis : il faut une formule ou un pack choisi
+  const signerEnLigne = () => {
+    const ch = s.choisi || {};
+    if (!ch.formule && !(ch.packs || []).length) return toast('Choisissez d\'abord une formule ou un pack (« Je choisis… »), puis cliquez sur « Faire signer ».');
+    onDevis(true);
+  };
   const cl = s.client, v = s.vendeur;
   const validite = fmtDate(addDays(today(), num(s.validite)));
   const formule = c.mode === 'formule' && c.pack;
@@ -851,6 +885,7 @@ function Proposal({ s, c, cTous, numero, onClose, toast, onExclu, onChoix, onDev
       <div className="no-print sticky top-0 z-10 mx-auto flex max-w-[1040px] flex-wrap items-center gap-2 bg-white/95 px-4 py-3 shadow-sm backdrop-blur sm:rounded-t-2xl">
         <button onClick={onClose} className="rounded-xl px-3 py-2 text-sm font-medium text-gray-600 hover:bg-gray-100">← Modifier</button>
         <div className="ml-auto flex flex-wrap gap-2">
+          <button onClick={signerEnLigne} className="rounded-xl bg-amber-400 px-4 py-2 text-sm font-semibold text-ink">✍ Faire signer</button>
           <button onClick={() => window.print()} className="rounded-xl bg-ink px-4 py-2 text-sm font-semibold text-white">PDF</button>
           <button onClick={copy} className="rounded-xl border border-gray-200 px-4 py-2 text-sm font-medium">Copier</button>
           <button onClick={whatsapp} className="rounded-xl bg-[#25D366] px-4 py-2 text-sm font-semibold text-white">WhatsApp</button>
@@ -1005,7 +1040,6 @@ function Proposal({ s, c, cTous, numero, onClose, toast, onExclu, onChoix, onDev
             {c.ttcM > 0 && s.inclus.trim() && <li>• Toujours inclus : {s.inclus.split('\n').filter(Boolean).join(', ').toLowerCase()}.</li>}
             <li>• {FRANCHISE ? `Prix en euros, nets à payer. ${MENTION_TVA}.` : `Prix en euros, TVA ${s.tva} % comprise dans les montants TTC.`}</li>
             <li>• Offre valable jusqu'au <strong>{validite}</strong>.</li>
-            {s.visuels.demoUrl && <li>• Démonstration en ligne : <a href={s.visuels.demoUrl} className="text-accent underline">{s.visuels.demoUrl}</a></li>}
           </ul>
         </section>
 
@@ -1015,12 +1049,11 @@ function Proposal({ s, c, cTous, numero, onClose, toast, onExclu, onChoix, onDev
             <p className="text-sm font-semibold">Bon pour accord</p>
             <p className="text-xs text-gray-500">{avecCombos ? 'Pack(s) ou formule cochés ci-dessus, date et signature' : 'Date et signature, précédées de « Bon pour accord »'}</p>
             <div className="mt-2 h-20 rounded-xl border border-dashed border-gray-300" />
+            <button onClick={signerEnLigne} className="no-print mt-2 rounded-xl bg-amber-400 px-4 py-2 text-sm font-semibold text-ink">✍ Faire signer en ligne</button>
           </div>
           <div className="text-sm">
             <p className="font-semibold">Votre contact</p>
-            {v.nom && <p className="mt-1">{v.nom}{v.societe && v.societe.toLowerCase() !== v.nom.toLowerCase() ? ' · ' + v.societe : ''}</p>}
-            {(v.telephone || v.email) && <p className="text-gray-600">{[v.telephone, v.email].filter(Boolean).join(' · ')}</p>}
-            {v.siret && <p className="text-gray-500">SIRET {v.siret}</p>}
+            <BlocVendeur v={v} className="mt-1" />
             <p className="mt-2 text-gray-500">Une question ? Appelez-moi, je vous réponds directement.</p>
           </div>
         </section>
@@ -1067,7 +1100,7 @@ function devisCalc(s, c) {
   return { k, blocs, r, P, M, acompte, titre, mois: c.mois, totalTTC: P.ttc + M.ttc * (c.mois || 1) };
 }
 
-function Devis({ s, d, numero, onBack, toast, dateFixe, barre, bandeau, signature, onSigne, onEnvoi }) {
+function Devis({ s, d, numero, onBack, toast, dateFixe, barre, bandeau, signature, onSigne, onEnvoi, signerAuto }) {
   const cl = s.client, v = s.vendeur;
   const jour = dateFixe ? new Date(dateFixe) : today();
   const date = fmtDate(jour), validite = fmtDate(addDays(jour, num(s.validite)));
@@ -1080,10 +1113,11 @@ function Devis({ s, d, numero, onBack, toast, dateFixe, barre, bandeau, signatur
     setEnvoi({ lien, empreinte });
     onEnvoi && onEnvoi(numero, empreinte);
   };
+  useEffect(() => { if (signerAuto && !signature) faireSigner(); }, []);
   const msgSigner = envoi && [`Bonjour${cl.responsable ? ' ' + cl.responsable.split(' ')[0] : ''},`, '',
     `Voici votre devis N° ${numero} (${d.titre}) à signer en ligne :`, envoi.lien, '',
     'Ouvrez le lien, vérifiez le devis, puis signez avec le doigt en bas de la page.', '',
-    [v.nom, v.societe, v.telephone].filter(Boolean).join(' · ')].join('\n');
+    [vendeurInfo(v).nom, vendeurInfo(v).societe, vendeurInfo(v).tel].filter(Boolean).join(' · ')].join('\n');
   const texte = [
     `Bonjour${cl.responsable ? ' ' + cl.responsable.split(' ')[0] : ''},`, '',
     `Voici votre devis N° ${numero} : ${d.titre}.`,
@@ -1091,7 +1125,7 @@ function Devis({ s, d, numero, onBack, toast, dateFixe, barre, bandeau, signatur
     d.M.ttc > 0 ? `• Chaque mois : ${FRANCHISE ? eur(d.M.ttc) : `${eur(d.M.ttc)} TTC (${eur(d.M.ht)} HT)`}${d.mois ? `, engagement ${d.mois} mois` : ''}` : false,
     d.acompte > 0 ? `• Acompte à la signature : ${eur(d.acompte)}${xTTC()}` : false,
     `Devis valable jusqu'au ${validite}.`, '',
-    [v.nom, v.societe, v.telephone].filter(Boolean).join(' · '),
+    [vendeurInfo(v).nom, vendeurInfo(v).societe, vendeurInfo(v).tel].filter(Boolean).join(' · '),
   ].filter(l => l !== false).join('\n');
   const whatsapp = () => { window.open(`https://wa.me/${waNumber(cl.telephone)}?text=${encodeURIComponent(texte)}`, '_blank'); toast('WhatsApp est ouvert avec le message prérempli. Joignez le PDF du devis puis envoyez.'); };
   const email = () => { window.location.href = `mailto:${encodeURIComponent(cl.email || '')}?subject=${encodeURIComponent(`Devis ${numero}${cl.entreprise ? ' – ' + cl.entreprise : ''}`)}&body=${encodeURIComponent(texte)}`; toast('Votre messagerie est ouverte. Joignez le PDF du devis puis envoyez.'); };
@@ -1174,10 +1208,7 @@ function Devis({ s, d, numero, onBack, toast, dateFixe, barre, bandeau, signatur
         <header className="avoid-break flex flex-wrap items-start justify-between gap-6">
           <div className="text-[13px] text-gray-600">
             {(s.visuels || {}).logo && <img src={s.visuels.logo} alt="" className="mb-2 h-12 w-auto rounded" />}
-            <p className="text-base font-semibold text-ink">{v.societe || v.nom || 'Votre société'}</p>
-            {v.societe && v.nom && <p>{v.nom}</p>}
-            {(v.telephone || v.email) && <p>{[v.telephone, v.email].filter(Boolean).join(' · ')}</p>}
-            {v.siret && <p>SIRET {v.siret}</p>}
+            <BlocVendeur v={v} fort />
           </div>
           <div className="text-right">
             <p className="font-display text-4xl font-semibold tracking-tight">Devis</p>
@@ -1300,7 +1331,7 @@ function Devis({ s, d, numero, onBack, toast, dateFixe, barre, bandeau, signatur
                 <div className="mt-2 h-24 rounded-xl border border-dashed border-gray-300" /></>}
           </div>
           <div>
-            <p className="text-sm font-semibold">{v.societe || v.nom || 'Le prestataire'}</p>
+            <p className="text-sm font-semibold">{vendeurInfo(v).societe || vendeurInfo(v).nom || 'Le prestataire'}</p>
             <p className="text-xs text-gray-500">Date et signature</p>
             <div className="mt-2 h-24 rounded-xl border border-dashed border-gray-300" />
           </div>
@@ -1429,7 +1460,7 @@ function PageSignature({ hash }) {
       </> : <>
         <p className="font-semibold text-emerald-900">Merci {sig.nom.split(' ')[0]}, votre devis est signé.</p>
         {dansCrm ? <p className="text-sm text-gray-700">La signature est enregistrée dans le CRM. Vous pouvez rendre la tablette.</p> : <>
-          <p className="text-sm text-gray-700">Dernière étape : renvoyez le devis signé {v.societe || v.nom ? 'à ' + (v.societe || v.nom) : 'à votre prestataire'}.</p>
+          <p className="text-sm text-gray-700">Dernière étape : renvoyez le devis signé {vendeurInfo(v).societe || vendeurInfo(v).nom ? 'à ' + (vendeurInfo(v).societe || vendeurInfo(v).nom) : 'à votre prestataire'}.</p>
           <div className="mt-3 flex flex-wrap gap-2">
             {v.telephone && <button onClick={() => window.open(`https://wa.me/${waNumber(v.telephone)}?text=${encodeURIComponent(texteRetour)}`, '_blank')} className={btn + ' bg-[#25D366] text-white'}>Renvoyer par WhatsApp</button>}
             {v.email && <button onClick={() => { window.location.href = `mailto:${encodeURIComponent(v.email)}?subject=${encodeURIComponent(`Devis ${snap.numero} signé`)}&body=${encodeURIComponent(texteRetour)}`; }} className={btn + ' border border-gray-200 bg-white'}>Renvoyer par email</button>}
@@ -1731,6 +1762,7 @@ function App() {
   const [open, setOpen] = useState({ client: true });
   const [showProposal, setShowProposal] = useState(false);
   const [showDevis, setShowDevis] = useState(false);
+  const [signerAuto, setSignerAuto] = useState(false);
   const [preview, setPreview] = useState(null);
   const [msg, setMsg] = useState('');
   const timer = useRef();
@@ -2150,8 +2182,8 @@ function App() {
               <div>
                 <p className="mb-3 text-xs font-medium uppercase tracking-wide text-gray-500">Vos coordonnées (conservées d'un client à l'autre)</p>
                 <div className="grid gap-4 sm:grid-cols-2">
-                  {[['nom', 'Votre nom'], ['societe', 'Votre société'], ['telephone', 'Téléphone'], ['email', 'Email'], ['siret', 'SIRET']].map(([k, l]) => (
-                    <Field key={k} label={l}><input className={inputCls} value={s.vendeur[k]} onChange={e => setVendeur(k, e.target.value)} /></Field>
+                  {[['civilite', 'Civilité (M., Mme)'], ['nom', 'Votre nom'], ['societe', 'Votre société (ou votre nom complet)'], ['statut', 'Statut (ex. Entrepreneur individuel (EI))'], ['telephone', 'Téléphone'], ['email', 'Email'], ['siret', 'SIRET']].map(([k, l]) => (
+                    <Field key={k} label={l}><input className={inputCls} value={s.vendeur[k] ?? DEFAULTS.vendeur[k]} onChange={e => setVendeur(k, e.target.value)} /></Field>
                   ))}
                 </div>
               </div>
@@ -2174,9 +2206,9 @@ function App() {
 
       {showProposal && !showDevis && <Proposal s={s} c={c} cTous={cTous} numero={numero} onClose={() => setShowProposal(false)} toast={toast}
         onExclu={(pid) => set(p => ({ exclus: { ...(p.exclus || {}), [pid]: !(p.exclus || {})[pid] } }))}
-        onChoix={(choisi) => set({ choisi })} onOption={() => set(p => ({ optionOuverte: !p.optionOuverte }))} onDevis={() => { setShowDevis(true); window.scrollTo(0, 0); }} />}
+        onChoix={(choisi) => set({ choisi })} onOption={() => set(p => ({ optionOuverte: !p.optionOuverte }))} onDevis={(signer) => { setSignerAuto(signer === true); setShowDevis(true); window.scrollTo(0, 0); }} />}
       {showProposal && showDevis && (() => { const d = devisCalc(s, c); return d
-        ? <Devis s={s} d={d} numero={numero} toast={toast} onBack={() => setShowDevis(false)} signature={(s.signes || {})[numero]}
+        ? <Devis s={s} d={d} numero={numero} toast={toast} onBack={() => setShowDevis(false)} signature={(s.signes || {})[numero]} signerAuto={signerAuto}
             onEnvoi={(n, e) => set(p => ({ envois: { ...(p.envois || {}), [n]: { empreinte: e, date: new Date().toISOString() } } }))} />
         : (setTimeout(() => setShowDevis(false)), null); })()}
       <Toast msg={msg} />
