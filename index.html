@@ -1160,7 +1160,7 @@ function PackEditor({ s, pk, r, actif, remiseInput, onPack, onItem, onSave, onRe
       : <input className={inputCls + (k === 'nom' ? ' font-semibold' : '')} value={pk[k] || ''} onChange={e => onPack({ [k]: e.target.value })} />}</Field>
   );
   return (
-    <div className="mt-5 rounded-3xl border-2 border-ink bg-white p-4 sm:p-6">
+    <div className="mt-3 rounded-3xl bg-white p-4 shadow-xl sm:p-6">
       <div className="flex flex-wrap items-baseline justify-between gap-2">
         <p className="font-display text-xl font-semibold">Personnaliser le {pk.nom}</p>
         <p className="text-sm text-gray-500">Les montants se mettent à jour à chaque modification.</p>
@@ -1342,6 +1342,13 @@ function App() {
   const setPrest = (id, patch) => set(p => ({ prestations: p.prestations.map(x => x.id === id ? { ...x, ...patch } : x) }));
   const toggle = (k) => setOpen(o => ({ ...o, [k]: !o[k] }));
   const [perso, setPerso] = useState(''); // formule en cours de personnalisation
+  useEffect(() => {
+    if (!perso) return;
+    const esc = (e) => e.key === 'Escape' && setPerso('');
+    document.addEventListener('keydown', esc);
+    document.body.style.overflow = 'hidden';
+    return () => { document.removeEventListener('keydown', esc); document.body.style.overflow = ''; };
+  }, [perso]);
   const setPack = (id, patch) => set(p => ({ packs: p.packs.map(x => x.id === id ? { ...x, ...(typeof patch === 'function' ? patch(x) : patch) } : x) }));
   const setPackItem = (id, prestId, val) => setPack(id, x => {
     const items = { ...x.items };
@@ -1545,11 +1552,23 @@ function App() {
                 })}
                 {perso && (() => {
                   const pk = s.packs.find(x => x.id === perso);
-                  return <PackEditor s={s} pk={pk} r={packsCalc[pk.id]} actif={s.pack === pk.id} remiseInput={remiseInput} onPrio={(id, v) => setPrest(id, { priorite: v })}
+                  return (
+                    <div className="fixed inset-0 z-50 overflow-y-auto bg-gray-900/50 sm:p-6" onClick={e => { if (e.target === e.currentTarget) setPerso(''); }}>
+                      <div className="mx-auto max-w-5xl">
+                        <div className="sticky top-0 z-10 flex items-center gap-3 rounded-b-2xl bg-white/95 px-4 py-3 shadow-sm backdrop-blur sm:rounded-2xl">
+                          <button onClick={() => setPerso('')} className="rounded-xl bg-gray-100 px-4 py-2 text-sm font-semibold hover:bg-gray-200">← Retour aux formules</button>
+                          <p className="min-w-0 flex-1 truncate font-display font-bold">{pk.nom}</p>
+                          <p className="tabular hidden text-sm text-gray-600 sm:block">{eur(packsCalc[pk.id].htP)} HT{packsCalc[pk.id].htM > 0 ? ` + ${eur(packsCalc[pk.id].htM)} HT / mois` : ''}</p>
+                        </div>
+                  <PackEditor s={s} pk={pk} r={packsCalc[pk.id]} actif={s.pack === pk.id} remiseInput={remiseInput} onPrio={(id, v) => setPrest(id, { priorite: v })}
                     onPack={patch => setPack(pk.id, patch)} onItem={(id, val) => setPackItem(pk.id, id, val)}
                     onSave={() => { setPerso(''); toast(`${pk.nom} enregistré sur cet appareil.`); }}
                     onChoisir={() => choisir(pk.id)}
-                    onReset={() => { if (confirm(`Remettre le ${pk.nom} dans sa composition d'origine (prestations, prix, remises, textes) ?`)) setPack(pk.id, { ...PACKS.find(x => x.id === pk.id) }); }} />;
+                    onReset={() => { if (confirm(`Remettre le ${pk.nom} dans sa composition d'origine (prestations, prix, remises, textes) ?`)) setPack(pk.id, { ...PACKS.find(x => x.id === pk.id) }); }} />
+                        <div className="h-8" />
+                      </div>
+                    </div>
+                  );
                 })()}
                 <p className="mt-5 text-sm text-gray-500">Les formules utilisent les prix du catalogue (onglet À la carte). Une prestation n'apparaît qu'une fois par formule.</p>
               </div>
