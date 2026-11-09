@@ -42,6 +42,7 @@
 <script src="https://unpkg.com/react@18.3.1/umd/react.production.min.js" crossorigin></script>
 <script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.production.min.js" crossorigin></script>
 <script src="https://unpkg.com/@babel/standalone@7.24.7/babel.min.js" crossorigin></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/lz-string/1.5.0/lz-string.min.js"></script>
 </head>
 <body class="font-sans text-ink antialiased">
 <div id="root"></div>
@@ -230,6 +231,8 @@ const DEFAULTS = {
   tva: 0,          // TVA non applicable (art. 293 B du CGI) : prix nets
   franchise: true,
   arrondi: true,
+  envois: {},   // devis envoyés en signature : numéro → empreinte
+  signes: {},   // devis signés : numéro → signature
   engagement: 12,
   acompte: { actif: true, pct: 30 },
   visuels: { logo: '', photos: [], demoUrl: PREFILL.demoUrl },
@@ -864,7 +867,7 @@ function Proposal({ s, c, cTous, numero, onClose, toast, onExclu, onChoix, onDev
             <p className="mt-1 text-gray-600">{[cl.responsable, cl.adresse, cl.telephone].filter(Boolean).join(' · ')}</p>
           </div>
           <div className="shrink-0 text-right">
-            {s.visuels.logo && <img src={s.visuels.logo} alt="" className="mb-2 ml-auto h-14 w-20 rounded-lg object-cover" />}
+            {(s.visuels || {}).logo && <img src={s.visuels.logo} alt="" className="mb-2 ml-auto h-14 w-20 rounded-lg object-cover" />}
             <p className="text-xs text-gray-500">{fmtDate(today())}<br />valable jusqu'au {validite}</p>
           </div>
         </header>
@@ -1064,14 +1067,28 @@ function devisCalc(s, c) {
   return { k, blocs, r, P, M, acompte, titre, mois: c.mois, totalTTC: P.ttc + M.ttc * (c.mois || 1) };
 }
 
-function Devis({ s, d, numero, onBack, toast }) {
+function Devis({ s, d, numero, onBack, toast, dateFixe, barre, bandeau, signature, onSigne, onEnvoi }) {
   const cl = s.client, v = s.vendeur;
-  const date = fmtDate(today()), validite = fmtDate(addDays(today(), num(s.validite)));
+  const jour = dateFixe ? new Date(dateFixe) : today();
+  const date = fmtDate(jour), validite = fmtDate(addDays(jour, num(s.validite)));
+  const [envoi, setEnvoi] = useState(null); // { lien, empreinte } du lien de signature
+  const faireSigner = async () => {
+    if (envoi) return setEnvoi(null);
+    const payload = LZString.compressToEncodedURIComponent(JSON.stringify(snapDevis(s, d, numero)));
+    const empreinte = await empreinteDe(payload);
+    const lien = `${location.origin}${location.pathname}#signer=${payload}`;
+    setEnvoi({ lien, empreinte });
+    onEnvoi && onEnvoi(numero, empreinte);
+  };
+  const msgSigner = envoi && [`Bonjour${cl.responsable ? ' ' + cl.responsable.split(' ')[0] : ''},`, '',
+    `Voici votre devis N° ${numero} (${d.titre}) à signer en ligne :`, envoi.lien, '',
+    'Ouvrez le lien, vérifiez le devis, puis signez avec le doigt en bas de la page.', '',
+    [v.nom, v.societe, v.telephone].filter(Boolean).join(' · ')].join('\n');
   const texte = [
     `Bonjour${cl.responsable ? ' ' + cl.responsable.split(' ')[0] : ''},`, '',
     `Voici votre devis N° ${numero} : ${d.titre}.`,
-    d.P.ttc > 0 ? `• Une seule fois : ${FRANCHISE ? eur(d.P.ttc) : `${eur(d.P.ttc)}{xTTC()} (${eur(d.P.ht)} HT)`}` : false,
-    d.M.ttc > 0 ? `• Chaque mois : ${FRANCHISE ? eur(d.M.ttc) : `${eur(d.M.ttc)}{xTTC()} (${eur(d.M.ht)} HT)`}${d.mois ? `, engagement ${d.mois} mois` : ''}` : false,
+    d.P.ttc > 0 ? `• Une seule fois : ${FRANCHISE ? eur(d.P.ttc) : `${eur(d.P.ttc)} TTC (${eur(d.P.ht)} HT)`}` : false,
+    d.M.ttc > 0 ? `• Chaque mois : ${FRANCHISE ? eur(d.M.ttc) : `${eur(d.M.ttc)} TTC (${eur(d.M.ht)} HT)`}${d.mois ? `, engagement ${d.mois} mois` : ''}` : false,
     d.acompte > 0 ? `• Acompte à la signature : ${eur(d.acompte)}${xTTC()}` : false,
     `Devis valable jusqu'au ${validite}.`, '',
     [v.nom, v.societe, v.telephone].filter(Boolean).join(' · '),
@@ -1125,17 +1142,38 @@ function Devis({ s, d, numero, onBack, toast }) {
   return (
     <div id="proposal-overlay" className="fixed inset-0 z-50 overflow-y-auto bg-gray-900/40 backdrop-blur-sm sm:p-6">
       <div className="no-print sticky top-0 z-10 mx-auto flex max-w-[1040px] flex-wrap items-center gap-2 bg-white/95 px-4 py-3 shadow-sm backdrop-blur sm:rounded-t-2xl">
+        {barre || <>
         <button onClick={onBack} className="rounded-xl px-3 py-2 text-sm font-medium text-gray-600 hover:bg-gray-100">← Proposition</button>
         <div className="ml-auto flex flex-wrap gap-2">
+          <button onClick={faireSigner} className={'rounded-xl px-4 py-2 text-sm font-semibold ' + (envoi ? 'bg-amber-100 text-amber-900' : 'bg-amber-400 text-ink')}>✍ Faire signer</button>
           <button onClick={() => window.print()} className="rounded-xl bg-ink px-4 py-2 text-sm font-semibold text-white">PDF du devis</button>
           <button onClick={whatsapp} className="rounded-xl bg-[#25D366] px-4 py-2 text-sm font-semibold text-white">WhatsApp</button>
           <button onClick={email} className="rounded-xl border border-gray-200 px-4 py-2 text-sm font-medium">Email</button>
         </div>
+        </>}
       </div>
+      {bandeau}
+      {envoi && (
+        <div className="no-print mx-auto max-w-[1040px] border-b border-amber-200 bg-amber-50 px-4 py-4 sm:px-6">
+          <p className="font-semibold">✍ Signature électronique du devis N° {numero}</p>
+          <p className="text-sm text-gray-600">Le client ouvre le lien sur son téléphone ou sa tablette, signe avec le doigt, puis vous renvoie le devis signé. Gratuit.</p>
+          <div className="mt-3 flex flex-wrap gap-2">
+            <button onClick={() => { window.open(`https://wa.me/${waNumber(cl.telephone)}?text=${encodeURIComponent(msgSigner)}`, '_blank'); toast('WhatsApp est ouvert avec le lien de signature. Il ne reste qu\'à envoyer.'); }}
+              className="rounded-xl bg-[#25D366] px-4 py-2 text-sm font-semibold text-white">Envoyer par WhatsApp</button>
+            <button onClick={() => { window.location.href = `mailto:${encodeURIComponent(cl.email || '')}?subject=${encodeURIComponent(`Devis ${numero} à signer`)}&body=${encodeURIComponent(msgSigner)}`; }}
+              className="rounded-xl border border-gray-200 bg-white px-4 py-2 text-sm font-medium">Envoyer par email</button>
+            <button onClick={async () => { try { await navigator.clipboard.writeText(envoi.lien); toast('Lien de signature copié.'); } catch { prompt('Copiez le lien :', envoi.lien); } }}
+              className="rounded-xl border border-gray-200 bg-white px-4 py-2 text-sm font-medium">Copier le lien</button>
+            <button onClick={() => { location.hash = envoi.lien.split('#')[1]; window.scrollTo(0, 0); }}
+              className="rounded-xl bg-ink px-4 py-2 text-sm font-semibold text-white">Signer ici, sur cette tablette</button>
+          </div>
+          <p className="mt-2 text-[11px] text-gray-500">Empreinte du devis : {envoi.empreinte}</p>
+        </div>
+      )}
       <article id="proposal" className="mx-auto max-w-[1040px] bg-white px-5 py-8 text-[14px] leading-relaxed shadow-xl sm:rounded-b-2xl sm:px-10 sm:py-9">
         <header className="avoid-break flex flex-wrap items-start justify-between gap-6">
           <div className="text-[13px] text-gray-600">
-            {s.visuels.logo && <img src={s.visuels.logo} alt="" className="mb-2 h-12 w-auto rounded" />}
+            {(s.visuels || {}).logo && <img src={s.visuels.logo} alt="" className="mb-2 h-12 w-auto rounded" />}
             <p className="text-base font-semibold text-ink">{v.societe || v.nom || 'Votre société'}</p>
             {v.societe && v.nom && <p>{v.nom}</p>}
             {(v.telephone || v.email) && <p>{[v.telephone, v.email].filter(Boolean).join(' · ')}</p>}
@@ -1254,10 +1292,12 @@ function Devis({ s, d, numero, onBack, toast }) {
         </section>
 
         <section className="avoid-break mt-6 grid gap-6 sm:grid-cols-2">
-          <div>
+          <div id="signature-client">
             <p className="text-sm font-semibold">Bon pour accord · le client</p>
-            <p className="text-xs text-gray-500">Date, signature et mention « Bon pour accord »</p>
-            <div className="mt-2 h-24 rounded-xl border border-dashed border-gray-300" />
+            {signature ? <SignatureVue sig={signature} />
+              : onSigne ? <PaveSignature onSigne={onSigne} nomDefaut={cl.responsable} />
+              : <><p className="text-xs text-gray-500">Date, signature et mention « Bon pour accord »</p>
+                <div className="mt-2 h-24 rounded-xl border border-dashed border-gray-300" /></>}
           </div>
           <div>
             <p className="text-sm font-semibold">{v.societe || v.nom || 'Le prestataire'}</p>
@@ -1269,6 +1309,150 @@ function Devis({ s, d, numero, onBack, toast }) {
       <div className="no-print h-10" />
     </div>
   );
+}
+
+/* ============================ Signature électronique ============================ */
+// Le lien contient tout le devis (compressé) : pas de serveur. Le retour contient le devis + la signature.
+const partSnap = (x) => ({ ...x, groupes: x.groupes.map(o => ({ id: o.id, nom: o.nom,
+  lignes: o.lignes.map(p => ({ id: p.id, nom: p.nom, court: p.court, description: p.description, qte: p.qte, unite: p.unite, prix: p.prix, type: p.type })) })) });
+const snapDevis = (s, d, numero) => ({ v: 1, numero, date: new Date().toISOString(),
+  s: { client: s.client, vendeur: s.vendeur, tva: s.tva, acompte: s.acompte, paiement: s.paiement, validite: s.validite },
+  d: { titre: d.titre, mois: d.mois, acompte: d.acompte, totalTTC: d.totalTTC, r: d.r,
+    k: d.k ? { nom: d.k.nom, remise: d.k.remise, blocs: d.k.blocs.map(o => ({ id: o.id, nom: o.nom })) } : null,
+    P: partSnap(d.P), M: partSnap(d.M) } });
+async function empreinteDe(txt) {
+  try {
+    const h = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(txt));
+    return [...new Uint8Array(h)].slice(0, 8).map(b => b.toString(16).padStart(2, '0')).join('').toUpperCase().match(/.{4}/g).join('-');
+  } catch { return '—'; }
+}
+const lire = (payload) => { try { return JSON.parse(LZString.decompressFromEncodedURIComponent(payload)); } catch { return null; } };
+const quandTxt = (iso) => { const x = new Date(iso); return `le ${fmtDate(x)} à ${x.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })}`; };
+const traitsPath = (traits) => traits.map(t => 'M' + t.map(([x, y]) => x + ' ' + y).join(' L') + (t.length === 1 ? ' l0.1 0' : '')).join(' ');
+
+function SignatureVue({ sig }) {
+  return (
+    <div className="mt-2 rounded-xl border border-emerald-300 bg-emerald-50/40 p-2">
+      <svg viewBox="0 0 600 200" className="h-24 w-full"><path d={traitsPath(sig.traits)} fill="none" stroke="#0b1b33" strokeWidth="3.2" strokeLinecap="round" strokeLinejoin="round" /></svg>
+      <p className="text-[12px] font-semibold text-emerald-800">✓ Bon pour accord · signé électroniquement par {sig.nom}</p>
+      <p className="text-[11px] text-gray-600">{quandTxt(sig.quand)}{sig.empreinte ? ` · empreinte du devis ${sig.empreinte}` : ''}</p>
+    </div>
+  );
+}
+
+function PaveSignature({ onSigne, nomDefaut }) {
+  const ref = useRef(), traits = useRef([]), enCours = useRef(null);
+  const [nom, setNom] = useState(nomDefaut || ''), [ok, setOk] = useState(false), [vide, setVide] = useState(true);
+  const dessine = () => {
+    const c = ref.current, ctx = c.getContext('2d');
+    ctx.clearRect(0, 0, c.width, c.height);
+    ctx.lineWidth = 3.2; ctx.lineCap = 'round'; ctx.lineJoin = 'round'; ctx.strokeStyle = '#0b1b33';
+    ctx.stroke(new Path2D(traitsPath(traits.current)));
+  };
+  const pt = (e) => { const r = ref.current.getBoundingClientRect(); return [Math.round((e.clientX - r.left) / r.width * 600), Math.round((e.clientY - r.top) / r.height * 200)]; };
+  const down = (e) => { e.preventDefault(); ref.current.setPointerCapture(e.pointerId); enCours.current = [pt(e)]; traits.current.push(enCours.current); setVide(false); dessine(); };
+  const move = (e) => { if (!enCours.current) return; const p = pt(e), l = enCours.current[enCours.current.length - 1];
+    if (Math.abs(p[0] - l[0]) + Math.abs(p[1] - l[1]) >= 3) { enCours.current.push(p); dessine(); } };
+  const up = () => { enCours.current = null; };
+  const effacer = () => { traits.current = []; setVide(true); dessine(); };
+  const pret = nom.trim().length > 1 && !vide && ok;
+  return (
+    <div className="no-print-border mt-2 space-y-2">
+      <input value={nom} onChange={e => setNom(e.target.value)} placeholder="Votre nom et prénom"
+        className="w-full rounded-xl border border-gray-300 px-3 py-2 text-[15px] outline-none focus:border-ink" />
+      <div className="relative">
+        <canvas ref={ref} width="600" height="200" onPointerDown={down} onPointerMove={move} onPointerUp={up} onPointerCancel={up}
+          className="h-36 w-full touch-none rounded-xl border-2 border-dashed border-gray-300 bg-white" style={{ touchAction: 'none' }} />
+        {vide && <p className="pointer-events-none absolute inset-0 grid place-items-center text-sm text-gray-400">Signez ici avec le doigt</p>}
+        {!vide && <button type="button" onClick={effacer} className="absolute right-2 top-2 rounded-lg bg-gray-100 px-2 py-1 text-xs text-gray-600">Effacer</button>}
+      </div>
+      <label className="flex items-start gap-2 text-[13px]">
+        <input type="checkbox" checked={ok} onChange={e => setOk(e.target.checked)} className="mt-0.5 h-5 w-5 shrink-0 accent-emerald-600" />
+        <span>J'ai lu ce devis et je l'accepte : <b>« Bon pour accord »</b>.</span>
+      </label>
+      <button type="button" disabled={!pret} onClick={() => onSigne({ nom: nom.trim(), traits: traits.current, quand: new Date().toISOString() })}
+        className={'w-full rounded-xl py-3 text-[15px] font-semibold text-white ' + (pret ? 'bg-emerald-600' : 'bg-gray-300')}>Signer le devis</button>
+      <p className="text-[11px] text-gray-500">Signature électronique simple. La date, l'heure et l'empreinte du devis sont enregistrées avec votre signature.</p>
+    </div>
+  );
+}
+
+// Enregistre la signature dans le CRM, si ce navigateur est celui du CRM
+const enregistrerSignature = (numero, sig) => {
+  try {
+    const st = JSON.parse(localStorage.getItem(STORE) || 'null');
+    if (!st) return false;
+    st.signes = { ...(st.signes || {}), [numero]: sig };
+    localStorage.setItem(STORE, JSON.stringify(st));
+    return true;
+  } catch { return false; }
+};
+
+// Page ouverte par le client (#signer=…) ou par vous au retour (#signe=…)
+function PageSignature({ hash }) {
+  const retour = hash.startsWith('#signe=');
+  const brut = hash.slice(retour ? 7 : 8);
+  const [payload, sigTxt] = brut.split('.');
+  const snap = useMemo(() => lire(payload), [payload]);
+  const [sig, setSig] = useState(() => (retour ? lire(sigTxt) : null));
+  const [empreinte, setEmpreinte] = useState('');
+  const [msg, setMsg] = useState('');
+  const [dansCrm, setDansCrm] = useState(false);
+  useEffect(() => { empreinteDe(payload).then(setEmpreinte); }, [payload]);
+  const st = useMemo(() => { try { return JSON.parse(localStorage.getItem(STORE) || 'null'); } catch { return null; } }, []);
+  const envoye = st && snap && (st.envois || {})[snap.numero];
+  useEffect(() => { if (retour && sig && snap && empreinte) setDansCrm(enregistrerSignature(snap.numero, { ...sig, empreinte, payload })); }, [empreinte]);
+  if (!snap) return <div className="mx-auto max-w-md p-8 text-center"><p className="font-semibold">Ce lien de devis est incomplet.</p><p className="text-sm text-gray-600">Demandez à votre prestataire de vous le renvoyer.</p></div>;
+  FRANCHISE = num(snap.s.tva) === 0;
+  const v = snap.s.vendeur || {}, cl = snap.s.client || {};
+  const toast = (m) => { setMsg(m); setTimeout(() => setMsg(''), 4500); };
+  const signer = (x) => { const full = { ...x, empreinte }; setSig(full); setDansCrm(enregistrerSignature(snap.numero, { ...full, payload })); window.scrollTo(0, 0); document.getElementById('proposal-overlay').scrollTo(0, 0); };
+  const lienRetour = sig && `${location.origin}${location.pathname}#signe=${payload}.${LZString.compressToEncodedURIComponent(JSON.stringify({ nom: sig.nom, traits: sig.traits, quand: sig.quand }))}`;
+  const texteRetour = sig && [`Bonjour${v.nom ? ' ' + v.nom.split(' ')[0] : ''},`, '', `Voici le devis N° ${snap.numero} signé par ${sig.nom}${cl.entreprise ? ' (' + cl.entreprise + ')' : ''} :`, lienRetour].join('\n');
+  const btn = 'rounded-xl px-4 py-2 text-sm font-semibold';
+  const barre = (
+    <>
+      <p className="text-sm font-semibold">{sig ? '✅ Devis signé' : '✍ Devis à signer'} · N° {snap.numero}</p>
+      <div className="ml-auto flex flex-wrap gap-2">
+        {dansCrm && <button onClick={() => { location.hash = ''; }} className={btn + ' border border-gray-200'}>← Retour au CRM</button>}
+        {!sig && <button onClick={() => document.getElementById('signature-client').scrollIntoView({ behavior: 'smooth' })} className={btn + ' bg-emerald-600 text-white'}>Signer ↓</button>}
+        <button onClick={() => window.print()} className={btn + ' bg-ink text-white'}>PDF</button>
+      </div>
+    </>
+  );
+  const bandeau = sig && (
+    <div className="no-print mx-auto max-w-[1040px] border-b border-emerald-200 bg-emerald-50 px-4 py-4 sm:px-6">
+      {retour ? <>
+        <p className="font-semibold text-emerald-900">Devis signé par {sig.nom} {quandTxt(sig.quand)}.</p>
+        <p className="text-sm text-gray-700">{envoye ? (envoye.empreinte === empreinte ? '✓ Identique au devis que vous avez envoyé (même empreinte).' : '⚠ Ce devis ne correspond pas à l\'empreinte du devis envoyé : vérifiez-le.') : 'Empreinte du devis : ' + empreinte}
+          {dansCrm ? ' Signature enregistrée dans votre CRM.' : ''} Cliquez sur « PDF » pour l'archiver.</p>
+      </> : <>
+        <p className="font-semibold text-emerald-900">Merci {sig.nom.split(' ')[0]}, votre devis est signé.</p>
+        {dansCrm ? <p className="text-sm text-gray-700">La signature est enregistrée dans le CRM. Vous pouvez rendre la tablette.</p> : <>
+          <p className="text-sm text-gray-700">Dernière étape : renvoyez le devis signé {v.societe || v.nom ? 'à ' + (v.societe || v.nom) : 'à votre prestataire'}.</p>
+          <div className="mt-3 flex flex-wrap gap-2">
+            {v.telephone && <button onClick={() => window.open(`https://wa.me/${waNumber(v.telephone)}?text=${encodeURIComponent(texteRetour)}`, '_blank')} className={btn + ' bg-[#25D366] text-white'}>Renvoyer par WhatsApp</button>}
+            {v.email && <button onClick={() => { window.location.href = `mailto:${encodeURIComponent(v.email)}?subject=${encodeURIComponent(`Devis ${snap.numero} signé`)}&body=${encodeURIComponent(texteRetour)}`; }} className={btn + ' border border-gray-200 bg-white'}>Renvoyer par email</button>}
+            <button onClick={async () => { try { await navigator.clipboard.writeText(texteRetour); toast('Message copié : collez-le à votre prestataire.'); } catch { prompt('Copiez ce lien :', lienRetour); } }} className={btn + ' border border-gray-200 bg-white'}>Copier le lien</button>
+          </div>
+        </>}
+      </>}
+    </div>
+  );
+  return (
+    <>
+      <Devis s={snap.s} d={snap.d} numero={snap.numero} dateFixe={snap.date} toast={toast} barre={barre} bandeau={bandeau}
+        signature={sig && { ...sig, empreinte: sig.empreinte || empreinte }} onSigne={signer} />
+      <Toast msg={msg} />
+    </>
+  );
+}
+
+function Racine() {
+  const [hash, setHash] = useState(location.hash);
+  useEffect(() => { const f = () => setHash(location.hash); window.addEventListener('hashchange', f); return () => window.removeEventListener('hashchange', f); }, []);
+  if (hash.startsWith('#signer=') || hash.startsWith('#signe=')) return <PageSignature key={hash} hash={hash} />;
+  return <App />;
 }
 
 /* ============================ Formules ============================ */
@@ -1992,14 +2176,15 @@ function App() {
         onExclu={(pid) => set(p => ({ exclus: { ...(p.exclus || {}), [pid]: !(p.exclus || {})[pid] } }))}
         onChoix={(choisi) => set({ choisi })} onOption={() => set(p => ({ optionOuverte: !p.optionOuverte }))} onDevis={() => { setShowDevis(true); window.scrollTo(0, 0); }} />}
       {showProposal && showDevis && (() => { const d = devisCalc(s, c); return d
-        ? <Devis s={s} d={d} numero={numero} toast={toast} onBack={() => setShowDevis(false)} />
+        ? <Devis s={s} d={d} numero={numero} toast={toast} onBack={() => setShowDevis(false)} signature={(s.signes || {})[numero]}
+            onEnvoi={(n, e) => set(p => ({ envois: { ...(p.envois || {}), [n]: { empreinte: e, date: new Date().toISOString() } } }))} />
         : (setTimeout(() => setShowDevis(false)), null); })()}
       <Toast msg={msg} />
     </>
   );
 }
 
-ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+ReactDOM.createRoot(document.getElementById('root')).render(<Racine />);
 </script>
 </body>
 </html>
