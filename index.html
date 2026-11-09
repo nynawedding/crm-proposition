@@ -106,23 +106,32 @@ const CATALOGUE = [
    Un pack = une liste d'identifiants du catalogue (jamais de doublon : c'est un objet {id: réglages}).
    Réglages possibles par ligne : prix, qte, type (sinon : valeurs du catalogue).
    La remise affichée = prix à la carte − prix final : elle est toujours réelle. */
-const IDS_SIGNATURE = ['tournage', 'retouche', 'montage', 'ecrans', 'site', 'miseenligne'];
-const IDS_PREMIUM = [...IDS_SIGNATURE, 'seo', 'suiviseo', 'hebergement', 'domaine', 'maintenance', 'social', 'contenus', 'reels'];
-const IDS_SERENITE = [...IDS_PREMIUM, 'planmkt', 'blog', 'saison', 'formulaire', 'fidelite', 'sms', 'qravis', 'reporting'];
+// Les ids internes (signature, premium, serenite) sont gardés pour les sauvegardes ; les noms suivent les packs vendus.
+const IDS_VISUEL_WEB = ['tournage', 'retouche', 'montage', 'ecrans', 'seo', 'site', 'suiviseo', 'hebergement', 'domaine', 'miseenligne'];
+const IDS_CROISSANCE = [...IDS_VISUEL_WEB, 'planmkt', 'blog', 'contenus', 'social', 'reels'];
+const IDS_SERENITE = [...IDS_CROISSANCE, 'formulaire', 'sms', 'fidelite', 'qravis', 'saison', 'reporting'];
 const toItems = (ids) => Object.fromEntries(ids.map(id => [id, {}]));
+const remiseDe = (x) => ({ ponctuel: { mode: '%', valeur: x }, mensuel: { mode: '%', valeur: x } });
 const PACKS = [
-  { id: 'signature', v: 1, nom: 'Pack Signature', sous: "L'essentiel",
-    promesse: 'Valoriser votre commerce tout de suite : de belles images et un site à votre image.',
-    points: ['Shooting photo professionnel dans votre boutique', 'Photos retouchées, prêtes à publier', 'Vidéos montées pour les écrans de la boutique', 'Votre site internet, créé et mis en ligne'],
-    items: toItems(IDS_SIGNATURE), remises: { ponctuel: { mode: '%', valeur: 5 }, mensuel: { mode: '%', valeur: 0 } } },
-  { id: 'premium', v: 1, nom: 'Pack Premium', sous: 'Développer sa visibilité', recommande: true,
-    promesse: 'Être vu sur Google et sur les réseaux, chaque mois, sans vous en occuper.',
-    points: ['Tout le Pack Signature', 'Fiche Google et référencement local', 'Site hébergé et entretenu', 'Instagram et Facebook gérés pour vous', 'Publications et vidéos courtes chaque mois'],
-    items: toItems(IDS_PREMIUM), remises: { ponctuel: { mode: '%', valeur: 10 }, mensuel: { mode: '%', valeur: 10 } } },
-  { id: 'serenite', v: 1, nom: 'Pack Sérénité', sous: 'Communication complète',
-    promesse: 'Toute votre communication prise en charge, pour attirer et faire revenir vos clients.',
-    points: ['Tout le Pack Premium', 'Plan marketing et événements (Noël, Ramadan…)', 'Articles de blog pour Google', 'Programme de fidélité avec QR code', 'SMS clients (avec accord) et avis Google', 'Suivi et reporting chaque mois'],
-    items: toItems(IDS_SERENITE), remises: { ponctuel: { mode: '%', valeur: 15 }, mensuel: { mode: '%', valeur: 15 } } },
+  { id: 'signature', v: 2, nom: 'Pack Premium', sous: 'Photo-vidéo + visibilité web',
+    promesse: 'De belles images de votre boutique et un commerce bien visible sur Google.',
+    points: ['Tournage photo et vidéo dans votre boutique', 'Photos retouchées et vidéos pour vos écrans', 'Fiche Google My Business optimisée', 'Votre site internet, hébergé, avec nom de domaine'],
+    items: toItems(IDS_VISUEL_WEB), remises: remiseDe(10) },
+  { id: 'premium', v: 2, nom: 'Pack Croissance', sous: '+ communication', recommande: true,
+    promesse: 'Tout le Premium, et nous communiquons pour vous faire gagner de nouveaux clients.',
+    points: ['Tout le Pack Premium', 'Plan marketing médias et réseaux sociaux', 'Contenus créés et publiés pour vous', 'Articles de blog pour Google', 'Vidéos courtes pour les réseaux'],
+    items: toItems(IDS_CROISSANCE), remises: remiseDe(15) },
+  { id: 'serenite', v: 2, nom: 'Pack Sérénité', sous: '+ fidélisation',
+    promesse: 'Tout est géré : attirer de nouveaux clients et faire revenir les fidèles.',
+    points: ['Tout le Pack Croissance', 'Base clients et envoi de SMS', 'Programme de fidélité avec QR code', 'Avis Google avec étoiles', 'Événements : Noël, anniversaires, Ramadan', 'Suivi et reporting chaque mois'],
+    items: toItems(IDS_SERENITE), remises: remiseDe(20) },
+];
+
+// Formules affichées dans le devis « à la carte » : elles regroupent les packs choisis, avec une remise.
+const COMBOS = [
+  { id: 'c1', nom: 'Pack Premium', sous: 'Photo-vidéo + visibilité web', blocs: ['base', 'web'], remise: 10 },
+  { id: 'c2', nom: 'Pack Croissance', sous: 'Premium + communication', blocs: ['base', 'web', 'social'], remise: 15, recommande: true },
+  { id: 'c3', nom: 'Pack Sérénité', sous: 'Tout, avec la fidélisation', blocs: ['base', 'web', 'social', 'fidel'], remise: 20 },
 ];
 
 const QUESTIONS = [
@@ -187,6 +196,7 @@ const DEFAULTS = {
   mode: 'carte',   // 'carte' ou 'formule'
   pack: '',        // formule choisie
   packs: PACKS,
+  combos: COMBOS,
   remises: { ponctuel: { mode: '%', valeur: 0 }, mensuel: { mode: '%', valeur: 0 } },
   tva: 20,
   engagement: 12,
@@ -351,6 +361,23 @@ function calc(s, sel, remises) {
     mois, moisCalc, totalHT, totalTTC, acompte, offres, economie };
 }
 
+// Formules du devis à la carte : somme des packs choisis (prix des lignes) moins la remise de la formule.
+// Une formule identique à la précédente (pack vide) n'est pas affichée.
+function combos(s, c) {
+  const t = 1 + num(s.tva) / 100, vus = new Set();
+  return (s.combos || COMBOS).map(k => {
+    const blocs = c.offres.filter(o => k.blocs.includes(o.id));
+    const cle = blocs.map(o => o.id).join('+');
+    if (blocs.length < 2 || vus.has(cle)) return null;
+    vus.add(cle);
+    const r = Math.min(100, Math.max(0, num(k.remise))) / 100;
+    const bP = blocs.reduce((a, o) => a + o.bP, 0), bM = blocs.reduce((a, o) => a + o.bM, 0);
+    const htP = bP * (1 - r), htM = bM * (1 - r);
+    return { ...k, blocs, bP, bM, htP, htM, ttcP: htP * t, ttcM: htM * t,
+      eco: ((bP - htP) + (bM - htM) * c.moisCalc) * t, totalTTC: (htP + htM * c.moisCalc) * t };
+  }).filter(Boolean);
+}
+
 // Compare la sélection à la carte avec une formule (en gardant ou non les prestations hors pack).
 function comparer(s, pack, garder) {
   const carteSel = s.prestations.filter(p => p.selected);
@@ -479,15 +506,22 @@ function buildText(s, c, numero) {
   const formule = c.mode === 'formule' && c.pack;
   L.push(`Bonjour${cl.responsable ? ' ' + cl.responsable.split(' ')[0] : ''},`, '');
   L.push(`Voici notre proposition pour ${cl.entreprise || 'votre commerce'} (devis ${numero}).`, '');
-  L.push(`${formule ? c.pack.nom.toUpperCase() : 'VOTRE SÉLECTION SUR MESURE'} : ${prixCourt(c)}`);
+  const kombi = formule ? [] : combos(s, c);
+  const prixHT = (a, m) => [a > 0 && eur(a) + ' HT', m > 0 && eur(m) + ' HT / mois'].filter(Boolean).join(' + ');
+  if (kombi.length) L.push('NOS PACKS (chacun peut être pris seul) :');
+  else L.push(`${formule ? c.pack.nom.toUpperCase() : 'VOTRE SÉLECTION SUR MESURE'} : ${prixCourt(c)}`);
   if (formule && c.pack.promesse) L.push(c.pack.promesse);
   c.offres.forEach(o => {
-    L.push('', o.nom);
+    L.push('', kombi.length ? `${o.nom} : ${prixHT(o.bP, o.bM)}` : o.nom);
     o.items.forEach(p => L.push(`   ✓ ${p.nom}${qteLabel(p) ? ' (' + qteLabel(p) + ')' : ''}${p.type === 'mensuel' ? ' · chaque mois' : ''}`));
   });
+  if (kombi.length) {
+    L.push('', 'NOS FORMULES (regroupez et économisez) :');
+    kombi.forEach(k => L.push(`★ ${k.nom} (${k.blocs.map(o => o.nom.replace(/^(Pack|Option)\s+/, '')).join(' + ')}) : ${prixHT(k.htP, k.htM)}, soit −${num(k.remise)} %${k.recommande ? ' · recommandé' : ''}`));
+  }
   L.push('');
-  if (c.economie > 0.5) L.push(`Remise incluse : ${eur(c.economie)} TTC d'économie${c.mois ? ` sur ${c.mois} mois` : ''}${formule ? ' par rapport aux mêmes prestations à la carte' : ''}.`);
-  L.push(`Total ${c.mois ? 'sur ' + c.mois + ' mois' : 'du 1er mois'} : ${eur(c.totalTTC)} TTC.`);
+  if (!kombi.length && c.economie > 0.5) L.push(`Remise incluse : ${eur(c.economie)} TTC d'économie${c.mois ? ` sur ${c.mois} mois` : ''}${formule ? ' par rapport aux mêmes prestations à la carte' : ''}.`);
+  if (!kombi.length) L.push(`Total ${c.mois ? 'sur ' + c.mois + ' mois' : 'du 1er mois'} : ${eur(c.totalTTC)} TTC.`);
   L.push(`Offre valable jusqu'au ${fmtDate(addDays(today(), num(s.validite)))}.`);
   if (s.visuels.demoUrl) L.push('Démonstration : ' + s.visuels.demoUrl);
   const v = s.vendeur;
@@ -517,10 +551,48 @@ function TableRemise({ r, tva, dense }) {
   );
 }
 
+// Carte d'un pack dans la proposition : bandeau de couleur, prix, prestations. Hauteur selon le contenu.
+function BlocCard({ o, c, large, cocher }) {
+  const option = o.id === 'fidel';
+  const coul = COULEURS[o.id] || '#1f3a5f';
+  return (
+    <div className={'avoid-break overflow-hidden rounded-3xl bg-white shadow-sm ' + (option ? 'border-2 border-dashed' : 'border-2')} style={{ borderColor: coul }}>
+      <div className={'px-5 py-4 text-white ' + (large ? 'sm:flex sm:items-end sm:justify-between sm:gap-6' : '')} style={{ background: coul }}>
+        <div className="min-w-0">
+          <p className="text-[11px] font-bold uppercase tracking-wider text-white/75">{option ? 'Option' : 'Pack ' + (OFFRE_IDS.indexOf(o.id) + 1)}</p>
+          <p className="font-display text-xl font-semibold leading-tight">{o.nom}</p>
+          <p className="mt-0.5 text-[13px] leading-snug text-white/85">{o.tag}</p>
+        </div>
+        <div className={'tabular mt-3 ' + (large ? 'sm:mt-0 sm:shrink-0 sm:text-right' : '')}>
+          {o.bP > 0 && <p className="font-display text-2xl font-semibold leading-none">{eur(o.bP)}<span className="ml-1 font-sans text-[11px] font-medium text-white/75">HT</span></p>}
+          {o.bM > 0 && <p className={'font-display font-semibold leading-none ' + (o.bP > 0 ? 'mt-1.5 text-base' : 'text-2xl')}>{o.bP > 0 ? '+ ' : ''}{eur(o.bM)}<span className="ml-1 font-sans text-[11px] font-medium text-white/75">HT / mois</span></p>}
+        </div>
+      </div>
+      <ul className={'gap-x-6 px-5 py-4 ' + (large ? 'grid gap-y-2 sm:grid-cols-2' : 'space-y-2')}>
+        {o.items.map(p => (
+          <li key={p.id} className="flex gap-2">
+            <Check className="h-4 w-4" />
+            <div className="min-w-0 flex-1">
+              <p className="font-medium leading-snug">{p.nom}{qteLabel(p) && <span className="font-normal text-gray-500"> · {qteLabel(p)}</span>}</p>
+              <p className="desc line-clamp-2 text-xs leading-snug text-gray-500">{p.description}</p>
+            </div>
+            <span className="tabular shrink-0 text-right text-xs text-gray-600">{eur(c.line(p))}{p.type === 'mensuel' && <span className="block">/ mois</span>}</span>
+          </li>
+        ))}
+      </ul>
+      {cocher && <p className="flex items-center gap-2 border-t border-gray-100 px-5 py-2.5 text-sm font-medium"><span className="inline-block h-4 w-4 rounded border-2 border-gray-400" />Je choisis ce pack</p>}
+    </div>
+  );
+}
+
 function Proposal({ s, c, numero, onClose, toast }) {
   const cl = s.client, v = s.vendeur;
   const validite = fmtDate(addDays(today(), num(s.validite)));
   const formule = c.mode === 'formule' && c.pack;
+  const kombi = formule ? [] : combos(s, c);
+  const avecCombos = kombi.length > 0;
+  const principaux = c.offres.filter(o => o.id !== 'fidel'), option = c.offres.find(o => o.id === 'fidel');
+  const cols = (n) => (n >= 3 ? 'sm:grid-cols-3' : n === 2 ? 'sm:grid-cols-2' : '');
   const text = buildText(s, c, numero);
   const subject = `Votre proposition ${cl.entreprise ? '– ' + cl.entreprise : ''} (${numero})`;
 
@@ -570,6 +642,13 @@ function Proposal({ s, c, numero, onClose, toast }) {
         </header>
 
         {/* Formule et prix */}
+        {avecCombos ? (
+          <section className="avoid-break mt-6 rounded-3xl bg-accent px-5 py-5 text-white sm:px-7">
+            <p className="text-xs font-bold uppercase tracking-wider text-white/70">Votre proposition</p>
+            <h2 className="font-display text-[26px] font-semibold leading-tight">Choisissez un pack, ou une formule qui les regroupe</h2>
+            <p className="mt-1 max-w-2xl text-white/85">Chaque pack peut être pris seul. Les formules en bas de page regroupent plusieurs packs à prix réduit.</p>
+          </section>
+        ) : (
         <section className="avoid-break mt-6 overflow-hidden rounded-3xl border-2 border-accent">
           <div className="bg-accent px-5 py-5 text-white sm:px-7">
             <p className="text-xs font-bold uppercase tracking-wider text-white/70">{formule ? (c.pack.sous || 'Formule') : 'À la carte'}</p>
@@ -591,48 +670,58 @@ function Proposal({ s, c, numero, onClose, toast }) {
             </div>
           )}
         </section>
+        )}
 
-        {/* Prestations incluses */}
+        {/* Prestations incluses : les packs alignés, l'option en dessous */}
         <section className="mt-6">
-          <h3 className="font-display text-xl font-semibold">Ce qui est inclus</h3>
-          <div className="mt-3 grid gap-4 sm:grid-cols-2">
-            {c.offres.map(o => {
-              const option = o.id === 'fidel';
-              const n = OFFRE_IDS.indexOf(o.id) + 1;
-              return (
-                <div key={o.id} className={'avoid-break overflow-hidden rounded-3xl bg-white shadow-sm ' + (option ? 'border-2 border-dashed' : 'border-2')} style={{ borderColor: COULEURS[o.id] || '#1f3a5f' }}>
-                  <div className="px-5 py-4 text-white" style={{ background: COULEURS[o.id] || '#1f3a5f' }}>
-                    <div className="flex items-start justify-between gap-3">
-                      <div className="min-w-0">
-                        <p className="text-[11px] font-bold uppercase tracking-wider text-white/75">{option ? 'Option' : 'Pack ' + n}</p>
-                        <p className="font-display text-xl font-semibold leading-tight">{o.nom}</p>
-                        <p className="mt-0.5 text-[13px] leading-snug text-white/85">{o.tag}</p>
-                      </div>
-                      <div className="tabular shrink-0 text-right">
-                        {o.bP > 0 && <p className="font-display text-2xl font-semibold leading-none">{eur(o.bP)}<span className="ml-1 font-sans text-[11px] font-medium text-white/75">HT</span></p>}
-                        {o.bM > 0 && <p className={'font-display font-semibold leading-none ' + (o.bP > 0 ? 'mt-1.5 text-base' : 'text-2xl')}>{o.bP > 0 ? '+ ' : ''}{eur(o.bM)}<span className="ml-1 font-sans text-[11px] font-medium text-white/75">HT / mois</span></p>}
-                      </div>
-                    </div>
-                  </div>
-                  <ul className="space-y-2 px-5 py-4">
-                    {o.items.map(p => (
-                      <li key={p.id} className="flex gap-2">
-                        <Check className="h-4 w-4" />
-                        <div className="min-w-0 flex-1">
-                          <p className="font-medium leading-snug">{p.nom}{qteLabel(p) && <span className="font-normal text-gray-500"> · {qteLabel(p)}</span>}</p>
-                          <p className="desc text-xs leading-snug text-gray-500">{p.description}</p>
-                        </div>
-                        <span className="tabular shrink-0 text-right text-xs text-gray-600">{eur(c.line(p))} HT{p.type === 'mensuel' && <span className="block">/ mois</span>}</span>
-                      </li>
-                    ))}
-                  </ul>
-                </div>
-              );
-            })}
+          <h3 className="font-display text-xl font-semibold">{avecCombos ? 'Nos packs' : 'Ce qui est inclus'}</h3>
+          <div className={'mt-3 grid items-start gap-4 ' + cols(principaux.length)}>
+            {principaux.map(o => <BlocCard key={o.id} o={o} c={c} cocher={avecCombos} />)}
           </div>
+          {option && <div className="mt-4"><BlocCard o={option} c={c} large cocher={avecCombos} /></div>}
         </section>
 
+        {/* Formules : regrouper les packs à prix réduit */}
+        {avecCombos && (
+          <section className="avoid-break mt-8">
+            <h3 className="font-display text-xl font-semibold">Nos formules : regroupez et économisez</h3>
+            <p className="text-sm text-gray-500">Les mêmes prestations que les packs ci-dessus, à prix réduit. Prix HT, TTC indiqué en dessous.</p>
+            <div className={'mt-5 grid items-stretch gap-4 ' + cols(kombi.length)}>
+              {kombi.map(k => {
+                const fort = k.recommande;
+                return (
+                  <div key={k.id} className={'relative flex flex-col rounded-3xl p-5 ' + (fort ? 'bg-accent text-white shadow-lg' : 'border-2 border-gray-200 bg-white')}>
+                    {fort && <span className="absolute -top-3 left-5 rounded-full bg-amber-400 px-3 py-1 text-[11px] font-bold uppercase tracking-wide text-ink">Recommandé</span>}
+                    <p className={'text-[11px] font-bold uppercase tracking-wider ' + (fort ? 'text-white/70' : 'text-gray-500')}>{k.sous}</p>
+                    <p className="font-display text-2xl font-semibold leading-tight">{k.nom}</p>
+                    <div className="mt-2 flex flex-wrap gap-1.5">
+                      {k.blocs.map(o => <span key={o.id} className="rounded-full px-2.5 py-0.5 text-[11px] font-semibold text-white ring-1 ring-white/30" style={{ background: COULEURS[o.id] }}>{o.nom.replace(/^(Pack|Option)\s+/, '').split(' & ')[0]}</span>)}
+                    </div>
+                    <div className="tabular mt-auto pt-4">
+                      {k.bP > 0 && <p><span className={'mr-2 text-sm line-through ' + (fort ? 'text-white/60' : 'text-gray-400')}>{eur(k.bP)}</span><span className="font-display text-[28px] font-semibold leading-none">{eur(k.htP)}</span><span className={'ml-1 text-xs ' + (fort ? 'text-white/70' : 'text-gray-500')}>HT</span></p>}
+                      {k.bM > 0 && <p className="mt-1"><span className={'mr-2 text-xs line-through ' + (fort ? 'text-white/60' : 'text-gray-400')}>{eur(k.bM)}</span><span className="font-display text-lg font-semibold">+ {eur(k.htM)}</span><span className={'ml-1 text-xs ' + (fort ? 'text-white/70' : 'text-gray-500')}>HT / mois</span></p>}
+                      <p className={'mt-1 text-xs ' + (fort ? 'text-white/70' : 'text-gray-500')}>soit {eur(k.ttcP)} TTC{k.ttcM > 0 ? ` + ${eur(k.ttcM)} TTC / mois` : ''}</p>
+                      {k.eco > 0.5 && <p className="mt-3 rounded-xl bg-emerald-50 px-3 py-1.5 text-xs font-semibold text-emerald-800">− {num(k.remise)} % · vous économisez {eur(k.eco)} TTC{c.mois && k.bM > 0 ? ` sur ${c.mois} mois` : ''}</p>}
+                      <p className="mt-3 flex items-center gap-2 text-sm font-medium"><span className="inline-block h-4 w-4 rounded border-2 border-current" />Je choisis cette formule</p>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </section>
+        )}
+
         {/* Détail du prix et paiement */}
+        {avecCombos ? (
+          <section className="avoid-break mt-6 border-t border-gray-200 pt-5 text-[13px]">
+            <h3 className="font-semibold">Comment vous payez</h3>
+            <ul className="mt-2 space-y-1 text-gray-700">
+              {s.acompte.actif && <li>• Prestations réalisées une fois : acompte de {s.acompte.pct} % à la signature, solde à la livraison.</li>}
+              <li>• Prestations mensuelles : payées chaque mois, {c.mois ? `engagement de ${c.mois} mois` : 'sans engagement'}.</li>
+            </ul>
+            {s.paiement.trim() && <p className="mt-2 whitespace-pre-line text-xs text-gray-500">{s.paiement}</p>}
+          </section>
+        ) : (
         <section className="avoid-break mt-6 grid gap-6 border-t border-gray-200 pt-5 sm:grid-cols-2">
           <div>
             <h3 className="font-semibold">Détail du prix</h3>
@@ -648,6 +737,7 @@ function Proposal({ s, c, numero, onClose, toast }) {
             {s.paiement.trim() && <p className="mt-2 whitespace-pre-line text-xs text-gray-500">{s.paiement}</p>}
           </div>
         </section>
+        )}
 
         {/* Conditions essentielles */}
         <section className="avoid-break mt-5 border-t border-gray-200 pt-5 text-[13px]">
@@ -665,7 +755,7 @@ function Proposal({ s, c, numero, onClose, toast }) {
         <section className="avoid-break mt-5 grid gap-6 border-t border-gray-200 pt-5 sm:grid-cols-2">
           <div>
             <p className="text-sm font-semibold">Bon pour accord</p>
-            <p className="text-xs text-gray-500">Date et signature, précédées de « Bon pour accord »</p>
+            <p className="text-xs text-gray-500">{avecCombos ? 'Pack(s) ou formule cochés ci-dessus, date et signature' : 'Date et signature, précédées de « Bon pour accord »'}</p>
             <div className="mt-2 h-20 rounded-xl border border-dashed border-gray-300" />
           </div>
           <div className="text-sm">
@@ -928,7 +1018,7 @@ function App() {
   const nouveauClient = () => {
     if (!confirm('Commencer un nouveau client ? La fiche, les réponses, la sélection et les visuels seront effacés. Vos tarifs et vos coordonnées sont conservés.')) return;
     set(p => ({ ...DEFAULTS, client: blankClient, visuels: { logo: '', photos: [], demoUrl: '' }, prestations: p.prestations.map(x => ({ ...x, selected: false })), vendeur: p.vendeur,
-      inclus: p.inclus, paiement: p.paiement, validite: p.validite, tva: p.tva, offres: p.offres, packs: p.packs, mode: 'carte', pack: '' }));
+      inclus: p.inclus, paiement: p.paiement, validite: p.validite, tva: p.tva, offres: p.offres, packs: p.packs, combos: p.combos, mode: 'carte', pack: '' }));
     setPerso('');
     setOpen({ client: true });
   };
@@ -1124,6 +1214,35 @@ function App() {
                       <textarea rows={2} className={inputCls + ' text-sm sm:col-span-3'} value={o.explication || ''} aria-label="Explication simple"
                         placeholder="En une phrase simple : c'est quoi ?"
                         onChange={e => set(p => ({ offres: (p.offres || OFFRES).map(x => x.id === o.id ? { ...x, explication: e.target.value } : x) }))} />
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+            <div className="mt-6 rounded-2xl bg-gray-50 p-4 sm:p-5">
+              <p className="font-display text-lg font-semibold">Formules proposées dans le devis</p>
+              <p className="mb-4 text-sm text-gray-500">Elles regroupent les packs cochés ci-dessus avec une remise. Dans le devis, le client choisit un pack seul ou une formule.</p>
+              <div className="space-y-4">
+                {(s.combos || COMBOS).map(k => {
+                  const r = combos(s, c).find(x => x.id === k.id);
+                  const maj = (patch) => set(p => ({ combos: (p.combos || COMBOS).map(x => x.id === k.id ? { ...x, ...patch } : patch.recommande ? { ...x, recommande: false } : x) }));
+                  return (
+                    <div key={k.id} className="grid gap-2 border-b border-gray-200 pb-4 last:border-0 sm:grid-cols-[1fr_1.3fr_130px]">
+                      <input className={inputCls + ' font-semibold'} value={k.nom} aria-label="Nom de la formule" onChange={e => maj({ nom: e.target.value })} />
+                      <input className={inputCls + ' text-sm'} value={k.sous} aria-label="Sous-titre" onChange={e => maj({ sous: e.target.value })} />
+                      <div className="relative">
+                        <input type="number" inputMode="decimal" min="0" max="100" className={inputCls + ' tabular pr-16'} value={k.remise} aria-label="Remise en %" onChange={e => maj({ remise: e.target.value })} />
+                        <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-sm text-gray-400">% remise</span>
+                      </div>
+                      <div className="flex flex-wrap items-center gap-2 sm:col-span-3">
+                        {(s.offres || OFFRES).map(o => (
+                          <Chip key={o.id} active={k.blocs.includes(o.id)} onClick={() => maj({ blocs: k.blocs.includes(o.id) ? k.blocs.filter(x => x !== o.id) : OFFRE_IDS.filter(x => x === o.id || k.blocs.includes(x)) })}>{o.nom.replace(/^(Pack|Option)\s+/, '')}</Chip>
+                        ))}
+                        <label className="ml-1 flex items-center gap-1.5 text-sm text-gray-600">
+                          <input type="radio" name="combo-reco" checked={!!k.recommande} onChange={() => maj({ recommande: true })} className="h-4 w-4 accent-[#1f3a5f]" />Recommandée
+                        </label>
+                        <span className="tabular ml-auto text-sm text-gray-600">{r ? [r.htP > 0 && eur(r.htP) + ' HT', r.htM > 0 && eur(r.htM) + ' HT/mois'].filter(Boolean).join(' + ') : 'non affichée (packs pas encore cochés)'}</span>
+                      </div>
                     </div>
                   );
                 })}
