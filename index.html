@@ -209,7 +209,7 @@ const DEFAULTS = {
   pack: '',        // formule choisie
   packs: PACKS,
   combos: COMBOS,
-  choix: {},  // abonnements décochés devant le client, par formule
+  exclus: {},  // prestations décochées devant le client dans « Nos packs » (sauf indispensables)
   remises: { ponctuel: { mode: '%', valeur: 0 }, mensuel: { mode: '%', valeur: 0 } },
   tva: 20,
   engagement: 12,
@@ -341,7 +341,8 @@ const packLines = (s, pack) => !pack ? [] : s.prestations
 function compute(s) {
   const pack = (s.packs || []).find(x => x.id === s.pack);
   if (s.mode === 'formule') return { ...calc(s, packLines(s, pack), pack ? pack.remises : DEFAULTS.remises), mode: 'formule', pack };
-  return { ...calc(s, s.prestations.filter(p => p.selected), s.remises), mode: 'carte', pack: null };
+  const exclu = (p) => prio(p) !== 'essentiel' && (s.exclus || {})[p.id];
+  return { ...calc(s, s.prestations.filter(p => p.selected && !exclu(p)), s.remises), mode: 'carte', pack: null };
 }
 
 // Moteur unique, pour la carte comme pour les formules.
@@ -396,8 +397,7 @@ function combos(s, c) {
     if (blocs.length < 2 || vus.has(cle)) return null;
     vus.add(cle);
     const r = Math.min(100, Math.max(0, num(k.remise))) / 100;
-    const exclu = ((s.choix || {})[k.id]) || {};
-    const inclus = (p) => prio(p) === 'essentiel' || !exclu[p.id];
+    const inclus = () => true;
     const items = blocs.flatMap(o => o.items);
     const unefois = items.filter(p => p.type !== 'mensuel');
     const mensTous = items.filter(p => p.type === 'mensuel').sort((a, b) => ordre[prio(a)] - ordre[prio(b)]);
@@ -591,9 +591,14 @@ function TableRemise({ r, tva, dense }) {
 }
 
 // Carte d'un pack dans la proposition : bandeau de couleur, prix, prestations. Hauteur selon le contenu.
-function BlocCard({ o, c, large, cocher }) {
+// Carte d'un pack : on coche ou décoche chaque prestation devant le client, le prix suit.
+// o = le pack avec toutes ses prestations ; r = le même pack après décochage (prix).
+function BlocCard({ o, r, c, large, cocher, exclus, onToggle, prixLigne }) {
   const option = o.id === 'fidel';
   const coul = COULEURS[o.id] || '#1f3a5f';
+  const ordre = { essentiel: 0, recommande: 1, option: 2 };
+  const items = [...o.items].sort((a, b) => (a.type === b.type ? 0 : a.type === 'mensuel' ? 1 : -1) || ordre[prio(a)] - ordre[prio(b)]);
+  const on = (p) => prio(p) === 'essentiel' || !exclus[p.id];
   return (
     <div className={'avoid-break overflow-hidden rounded-3xl bg-white shadow-sm ' + (option ? 'border-2 border-dashed' : 'border-2')} style={{ borderColor: coul }}>
       <div className={'px-5 py-4 text-white ' + (large ? 'sm:flex sm:items-end sm:justify-between sm:gap-6' : '')} style={{ background: coul }}>
@@ -603,20 +608,17 @@ function BlocCard({ o, c, large, cocher }) {
           <p className="mt-0.5 text-[13px] leading-snug text-white/85">{o.tag}</p>
         </div>
         <div className={'tabular mt-3 ' + (large ? 'sm:mt-0 sm:shrink-0 sm:text-right' : '')}>
-          {o.bP > 0 && <p className="font-display text-2xl font-semibold leading-none">{eur(o.ttcP)}<span className="ml-1 font-sans text-[11px] font-medium text-white/75">TTC</span></p>}
-          {o.bM > 0 && <p className={'font-display font-semibold leading-none ' + (o.bP > 0 ? 'mt-1.5 text-base' : 'text-2xl')}>{o.bP > 0 ? 'puis ' : ''}{eur(o.ttcM)}<span className="ml-1 font-sans text-[11px] font-medium text-white/75">{o.bP > 0 ? '/ mois' : 'TTC / mois'}</span></p>}
+          {r.ttcP > 0 && <p className="font-display text-2xl font-semibold leading-none">{eur(r.ttcP)}<span className="ml-1 font-sans text-[11px] font-medium text-white/75">TTC</span></p>}
+          {r.ttcM > 0 && <p className={'font-display font-semibold leading-none ' + (r.ttcP > 0 ? 'mt-1.5 text-base' : 'text-2xl')}>{r.ttcP > 0 ? 'puis ' : ''}{eur(r.ttcM)}<span className="ml-1 font-sans text-[11px] font-medium text-white/75">{r.ttcP > 0 ? '/ mois' : 'TTC / mois'}</span></p>}
+          {r.ttcP <= 0 && r.ttcM <= 0 && <p className="text-sm text-white/80">Rien de coché</p>}
         </div>
       </div>
-      <ul className={'gap-x-6 px-5 py-4 ' + (large ? 'grid gap-y-2 sm:grid-cols-2' : 'space-y-2')}>
-        {o.items.map(p => (
-          <li key={p.id} className="flex gap-2">
-            <Check className="h-4 w-4" />
-            <div className="min-w-0 flex-1">
-              <p className="font-medium leading-snug">{p.nom}{qteLabel(p) && <span className="font-normal text-gray-500"> · {qteLabel(p)}</span>}</p>
-              <p className="desc line-clamp-2 text-xs leading-snug text-gray-500">{p.description}</p>
-            </div>
-            {p.type === 'mensuel' && <span className="h-fit shrink-0 rounded-full bg-sky-50 px-2 py-0.5 text-[10px] font-semibold text-sky-800">chaque mois</span>}
-          </li>
+      <ul className={'gap-x-4 px-3 py-3 ' + (large ? 'grid sm:grid-cols-2' : 'space-y-0.5')}>
+        {items.map((p, i) => (
+          <React.Fragment key={p.id}>
+            {!large && p.type === 'mensuel' && (i === 0 || items[i - 1].type !== 'mensuel') && <li className="px-2 pt-2 text-[11px] font-bold uppercase tracking-wider text-gray-400">Chaque mois</li>}
+            <LigneMois p={p} on={on(p)} prix={prixLigne(p)} suffixe={p.type === 'mensuel' ? ' /mois' : ''} onToggle={onToggle && (() => onToggle(p.id))} />
+          </React.Fragment>
         ))}
       </ul>
       {cocher && <p className="flex items-center gap-2 border-t border-gray-100 px-5 py-2.5 text-sm font-medium"><span className="inline-block h-4 w-4 rounded border-2 border-gray-400" />Je choisis ce pack</p>}
@@ -630,37 +632,44 @@ const BADGE = {
   recommande: ['Recommandé', 'bg-emerald-100 text-emerald-800'],
   option: ['Au choix', 'bg-gray-100 text-gray-600'],
 };
-function LigneMois({ p, on, fort, prix, onToggle }) {
-  const pr = prio(p), fixe = pr === 'essentiel';
+function LigneMois({ p, on, fort, prix, onToggle, lecture, suffixe = '' }) {
+  const pr = prio(p), fixe = lecture || !onToggle || pr === 'essentiel';
   return (
     <li className={on ? '' : 'no-print'}>
       <button type="button" onClick={fixe ? undefined : onToggle} aria-pressed={on} disabled={fixe}
         className={'flex w-full items-start gap-2 rounded-xl px-2 py-1.5 text-left transition ' + (fixe ? 'cursor-default ' : (fort ? 'hover:bg-white/10 ' : 'hover:bg-gray-50 ')) + (on ? '' : 'opacity-50')}>
         <span className={'mt-0.5 grid h-[18px] w-[18px] shrink-0 place-items-center rounded-md border-2 ' + (on ? (fort ? 'border-white bg-white text-accent' : 'border-accent bg-accent text-white') : (fort ? 'border-white/60' : 'border-gray-300'))}>
-          {on && (fixe
+          {on && (pr === 'essentiel'
             ? <svg className="h-3 w-3" viewBox="0 0 20 20" fill="currentColor"><path fillRule="evenodd" d="M10 2a4 4 0 00-4 4v2H5a2 2 0 00-2 2v6a2 2 0 002 2h10a2 2 0 002-2v-6a2 2 0 00-2-2h-1V6a4 4 0 00-4-4zm2 6V6a2 2 0 10-4 0v2h4z" clipRule="evenodd"/></svg>
             : <svg className="h-3 w-3" viewBox="0 0 20 20" fill="currentColor"><path fillRule="evenodd" d="M16.7 5.3a1 1 0 010 1.4l-7.5 7.5a1 1 0 01-1.4 0l-3.5-3.5a1 1 0 111.4-1.4l2.8 2.8 6.8-6.8a1 1 0 011.4 0z" clipRule="evenodd"/></svg>)}
         </span>
         <span className="min-w-0 flex-1">
-          <span className="block text-[13px] font-medium leading-snug">{p.court || p.nom}</span>
+          <span className="block text-[13px] font-medium leading-snug">{lecture ? (p.court || p.nom) : p.nom}{!lecture && qteLabel(p) && <span className="font-normal opacity-60"> · {qteLabel(p)}</span>}</span>
           <span className="mt-0.5 flex flex-wrap items-center gap-1.5">
             <span className={'rounded-full px-1.5 py-px text-[10px] font-bold uppercase tracking-wide ' + BADGE[pr][1]}>{BADGE[pr][0]}</span>
             {RAISONS[p.id] && <span className={'text-[11px] ' + (fort ? 'text-white/60' : 'text-gray-500')}>{RAISONS[p.id]}</span>}
           </span>
         </span>
-        <span className={'tabular shrink-0 text-[12px] ' + (fort ? 'text-white/80' : 'text-gray-600')}>{eur(prix)}</span>
+        <span className={'tabular shrink-0 text-[12px] ' + (fort ? 'text-white/80' : 'text-gray-600')}>{eur(prix)}{suffixe}</span>
       </button>
     </li>
   );
 }
 
-function Proposal({ s, c, numero, onClose, toast, onChoix }) {
+function Proposal({ s, c, cTous, numero, onClose, toast, onExclu }) {
   const cl = s.client, v = s.vendeur;
   const validite = fmtDate(addDays(today(), num(s.validite)));
   const formule = c.mode === 'formule' && c.pack;
   const kombi = formule ? [] : combos(s, c);
   const avecCombos = kombi.length > 0;
-  const principaux = c.offres.filter(o => o.id !== 'fidel'), option = c.offres.find(o => o.id === 'fidel');
+  // listes complètes (pour pouvoir recocher) ; prix calculés sur ce qui reste coché
+  const tous = formule ? c.offres : cTous.offres;
+  const principaux = tous.filter(o => o.id !== 'fidel'), option = tous.find(o => o.id === 'fidel');
+  const prixBloc = (o) => c.offres.find(x => x.id === o.id) || { ttcP: 0, ttcM: 0 };
+  const sommeL = (arr) => arr.reduce((a, p) => a + c.line(p), 0);
+  const kP = sommeL(c.ponct) ? c.htP / sommeL(c.ponct) : 1, kM = sommeL(c.mens) ? c.htM / sommeL(c.mens) : 1;
+  const prixLigne = (p) => c.line(p) * (p.type === 'mensuel' ? kM : kP) * (1 + num(s.tva) / 100);
+  const carte = { exclus: formule ? {} : (s.exclus || {}), onToggle: formule ? null : onExclu, prixLigne, c };
   const cols = (n) => (n >= 3 ? 'sm:grid-cols-3' : n === 2 ? 'sm:grid-cols-2' : '');
   const text = buildText(s, c, numero);
   const subject = `Votre proposition ${cl.entreprise ? '– ' + cl.entreprise : ''} (${numero})`;
@@ -745,9 +754,9 @@ function Proposal({ s, c, numero, onClose, toast, onChoix }) {
         <section className="mt-6">
           <h3 className="font-display text-xl font-semibold">{avecCombos ? 'Nos packs' : 'Ce qui est inclus'}</h3>
           <div className={'mt-3 grid items-start gap-4 ' + cols(principaux.length)}>
-            {principaux.map(o => <BlocCard key={o.id} o={o} c={c} tva={s.tva} cocher={avecCombos} />)}
+            {principaux.map(o => <BlocCard key={o.id} o={o} r={prixBloc(o)} {...carte} cocher={avecCombos} />)}
           </div>
-          {option && <div className="mt-4"><BlocCard o={option} c={c} tva={s.tva} large cocher={avecCombos} /></div>}
+          {option && <div className="mt-4"><BlocCard o={option} r={prixBloc(option)} {...carte} large cocher={avecCombos} /></div>}
         </section>
 
         {/* Formules : regrouper les packs à prix réduit */}
@@ -780,7 +789,7 @@ function Proposal({ s, c, numero, onClose, toast, onChoix }) {
                           <p className="font-display text-2xl font-semibold leading-none">{eur(k.ttcM)}<span className={'ml-1 font-sans text-sm font-medium ' + (fort ? 'text-white/70' : 'text-gray-500')}>TTC / mois</span></p>
                           <p className={'mt-1 text-xs ' + (fort ? 'text-white/70' : 'text-gray-500')}>Ce que vous payez chaque mois :</p>
                           <ul className="mt-1.5 space-y-1">
-                            {k.mensTous.map(p => <LigneMois key={p.id} p={p} on={k.inclus(p)} fort={fort} prix={k.prixMois(p)} onToggle={() => onChoix(k.id, p.id)} />)}
+                            {k.mensTous.map(p => <LigneMois key={p.id} p={p} on fort={fort} prix={k.prixMois(p)} lecture />)}
                           </ul>
                         </div>
                       )}
@@ -1078,6 +1087,7 @@ function App() {
   };
 
   const c = useMemo(() => compute(s), [s]);
+  const cTous = useMemo(() => compute({ ...s, exclus: {} }), [s]);
   const packsCalc = useMemo(() => Object.fromEntries(s.packs.map(pk => [pk.id, calc(s, packLines(s, pk), pk.remises)])), [s]);
   const sugg = useMemo(() => suggestions(s.reponses), [s.reponses]);
   const numero = useMemo(() => {
@@ -1447,8 +1457,8 @@ function App() {
         )}
       </div>
 
-      {showProposal && <Proposal s={s} c={c} numero={numero} onClose={() => setShowProposal(false)} toast={toast}
-        onChoix={(cid, pid) => set(p => ({ choix: { ...(p.choix || {}), [cid]: { ...((p.choix || {})[cid] || {}), [pid]: !(((p.choix || {})[cid] || {})[pid]) } } }))} />}
+      {showProposal && <Proposal s={s} c={c} cTous={cTous} numero={numero} onClose={() => setShowProposal(false)} toast={toast}
+        onExclu={(pid) => set(p => ({ exclus: { ...(p.exclus || {}), [pid]: !(p.exclus || {})[pid] } }))} />}
       <Toast msg={msg} />
     </>
   );
