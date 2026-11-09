@@ -26,6 +26,7 @@
   .tabular { font-variant-numeric: tabular-nums; }
   @media print {
     @page { size: A4; margin: 14mm; }
+    * { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
     body { background: #fff !important; }
     .no-print { display: none !important; }
     #proposal-overlay { position: static !important; background: #fff !important; overflow: visible !important; padding: 0 !important; }
@@ -47,10 +48,19 @@ const { useState, useEffect, useMemo, useRef } = React;
 /* ============================================================
    Données par défaut (tarifs indicatifs : à ajuster dans l'app)
    ============================================================ */
+// Trois offres bien séparées dans la proposition : la demande du client, puis deux options.
+const OFFRES = [
+  { id: 'base', nom: 'Votre demande', tag: 'Ce que vous nous avez demandé' },
+  { id: 'opt1', nom: 'Option Visibilité', tag: 'Pour attirer de nouveaux clients' },
+  { id: 'opt2', nom: 'Option Gestion mensuelle', tag: 'Pour ne plus vous en occuper' },
+];
+const OFFRE_PAR_DEFAUT = { shooting: 'base', video: 'base', ecrans: 'base', site: 'opt1', seo: 'opt1', gbp: 'opt1', miseenligne: 'opt1' };
+
 const CATALOGUE = [
   { id: 'site', type: 'ponctuel', nom: 'Création de site internet', description: "Site vitrine responsive (5 à 8 pages), design sur mesure, formulaire de contact, optimisé mobile.", prix: 1490, qte: 1, unite: 'site' },
   { id: 'shooting', type: 'ponctuel', nom: 'Shooting photo professionnel', description: "Demi-journée sur place : produits, équipe, boutique. Photos retouchées, droits d'usage web et réseaux.", prix: 390, qte: 1, unite: 'séance' },
-  { id: 'video', type: 'ponctuel', nom: 'Production vidéo / Reels', description: "Tournage et montage de vidéos courtes verticales, sous-titrées, prêtes à publier.", prix: 190, qte: 3, unite: 'vidéo' },
+  { id: 'video', type: 'ponctuel', nom: 'Production vidéo', description: "Tournage et montage de vidéos courtes (produits, savoir-faire, ambiance), prêtes pour vos écrans et vos réseaux.", prix: 190, qte: 3, unite: 'vidéo' },
+  { id: 'ecrans', type: 'ponctuel', nom: 'Contenus pour vos écrans en boutique', description: "Montage d'une boucle photo et vidéo au format de vos écrans (horizontal ou vertical), livrée prête à diffuser.", prix: 290, qte: 1, unite: 'boucle' },
   { id: 'seo', type: 'ponctuel', nom: 'SEO et référencement local', description: "Audit, mots-clés locaux, optimisation des pages et des balises, inscription aux annuaires clés.", prix: 390, qte: 1, unite: 'forfait' },
   { id: 'gbp', type: 'ponctuel', nom: 'Optimisation fiche Google Business Profile', description: "Fiche complète : catégories, horaires, photos, produits, réponses aux avis.", prix: 190, qte: 1, unite: 'forfait' },
   { id: 'miseenligne', type: 'ponctuel', nom: 'Mise en ligne et configuration', description: "Nom de domaine, hébergement, adresses email, statistiques, sécurité (HTTPS).", prix: 150, qte: 1, unite: 'forfait' },
@@ -62,9 +72,11 @@ const CATALOGUE = [
   { id: 'majsite', type: 'mensuel', nom: 'Mises à jour du site', description: "Modifications de contenu : horaires, produits, actualités, photos (jusqu'à 1 h / mois).", prix: 39, qte: 1, unite: 'mois' },
   { id: 'suiviseo', type: 'mensuel', nom: 'Suivi SEO local', description: "Suivi des positions, publications Google, gestion des avis, ajustements continus.", prix: 99, qte: 1, unite: 'mois' },
   { id: 'reporting', type: 'mensuel', nom: 'Reporting mensuel', description: "Tableau de bord clair : visites, appels, abonnés, avis, et recommandations du mois.", prix: 49, qte: 1, unite: 'mois' },
-].map(p => ({ ...p, selected: false, pack: false }));
+].map(p => ({ ...p, selected: false, offre: OFFRE_PAR_DEFAUT[p.id] || 'opt2' }));
 
 const QUESTIONS = [
+  { id: 'demande', q: 'Pourquoi nous avez-vous contacté ?', multi: true,
+    options: ['Shooting photo', 'Vidéos', 'Contenus pour mes écrans en boutique', 'Site internet', 'Réseaux sociaux'] },
   { id: 'objectif', q: 'Quel est votre objectif principal ?', multi: true,
     options: ['Attirer plus de clients en boutique', 'Être visible sur Google', 'Développer les réseaux sociaux', 'Prendre des commandes en ligne', 'Image plus premium', 'Fidéliser la clientèle'] },
   { id: 'site', q: 'Avez-vous déjà un site internet ?',
@@ -87,6 +99,11 @@ const QUESTIONS = [
 const suggestions = (rep) => {
   const s = new Set();
   const has = (q, o) => (rep[q] || []).includes(o);
+  if (has('demande', 'Shooting photo')) s.add('shooting');
+  if (has('demande', 'Vidéos')) s.add('video');
+  if (has('demande', 'Contenus pour mes écrans en boutique')) ['shooting', 'video', 'ecrans'].forEach(x => s.add(x));
+  if (has('demande', 'Site internet')) s.add('site');
+  if (has('demande', 'Réseaux sociaux')) s.add('social');
   if (has('site', 'Non') || has('site', 'Oui, à refaire')) ['site', 'miseenligne', 'hebergement', 'maintenance'].forEach(x => s.add(x));
   if (has('objectif', 'Être visible sur Google') || has('objectif', 'Attirer plus de clients en boutique')) ['gbp', 'seo', 'suiviseo'].forEach(x => s.add(x));
   if (has('objectif', 'Développer les réseaux sociaux') || has('reseaux', 'Personne') || has('reseaux', 'Moi-même')) ['social', 'contenus'].forEach(x => s.add(x));
@@ -115,7 +132,7 @@ const DEFAULTS = {
   reponses: {},
   notes: {},
   prestations: CATALOGUE,
-  packNom: 'Pack Visibilité',
+  offres: OFFRES,
   remises: { ponctuel: { mode: '%', valeur: 0 }, mensuel: { mode: '%', valeur: 0 } },
   tva: 20,
   engagement: 12,
@@ -202,8 +219,20 @@ function compute(s) {
   const totalHT = htP + htM * moisCalc;
   const totalTTC = ttcP + ttcM * moisCalc;
   const acompte = s.acompte.actif ? ttcP * num(s.acompte.pct) / 100 : 0;
+  // répartition par offre (remise répartie au prorata)
+  const kP = brutP ? htP / brutP : 1, kM = brutM ? htM / brutM : 1;
+  const offres = (s.offres || OFFRES).map(o => {
+    const items = sel.filter(p => (p.offre || 'base') === o.id);
+    const bP = items.filter(p => p.type === 'ponctuel').reduce((a, p) => a + line(p), 0);
+    const bM = items.filter(p => p.type === 'mensuel').reduce((a, p) => a + line(p), 0);
+    const oHtP = bP * kP, oHtM = bM * kM;
+    const oTtcP = oHtP * (1 + t), oTtcM = oHtM * (1 + t);
+    const oAcompte = s.acompte.actif ? oTtcP * num(s.acompte.pct) / 100 : 0;
+    return { ...o, items, htP: oHtP, htM: oHtM, ttcP: oTtcP, ttcM: oTtcM, acompte: oAcompte,
+      totalTTC: oTtcP + oTtcM * moisCalc, totalHT: oHtP + oHtM * moisCalc };
+  }).filter(o => o.items.length);
   return { sel, ponct, mens, line, brutP, brutM, remP, remM, htP, htM, ttcP, ttcM, tvaP: ttcP - htP, tvaM: ttcM - htM,
-    mois, moisCalc, totalHT, totalTTC, acompte };
+    mois, moisCalc, totalHT, totalTTC, acompte, offres };
 }
 
 /* ============================ UI de base ============================ */
@@ -257,7 +286,7 @@ function Toast({ msg }) {
 }
 
 /* ============================ Carte prestation ============================ */
-function PrestationCard({ p, suggested, onChange, onRemove }) {
+function PrestationCard({ p, suggested, onChange, onRemove, offres }) {
   const total = num(p.prix) * Math.max(1, num(p.qte) || 1);
   return (
     <div className={'rounded-2xl border p-4 transition ' + (p.selected ? 'border-accent bg-accent-soft/40 ring-1 ring-accent/20' : 'border-gray-200 bg-white')}>
@@ -290,9 +319,12 @@ function PrestationCard({ p, suggested, onChange, onRemove }) {
           <input type="number" inputMode="numeric" min="1" step="1" value={p.qte} onChange={e => onChange({ qte: e.target.value })}
             className={inputCls + ' tabular py-2'} />
         </label>
-        <label className="flex items-center gap-2 pb-2.5 text-sm text-gray-600">
-          <input type="checkbox" checked={p.pack} onChange={e => onChange({ pack: e.target.checked, selected: e.target.checked ? true : p.selected })}
-            className="h-4 w-4 rounded border-gray-300 accent-[#1f3a5f]" /> Dans le pack
+        <label className="min-w-[150px]">
+          <span className="mb-1 block text-[11px] uppercase tracking-wide text-gray-500">Dans l'offre</span>
+          <select value={p.offre || 'base'} onChange={e => onChange({ offre: e.target.value })}
+            className={inputCls + ' py-2 text-sm'}>
+            {offres.map(o => <option key={o.id} value={o.id}>{o.nom}</option>)}
+          </select>
         </label>
         <div className="ml-auto pb-2 text-right">
           <div className="tabular text-base font-semibold">{eur(total)}</div>
@@ -305,55 +337,104 @@ function PrestationCard({ p, suggested, onChange, onRemove }) {
 }
 
 /* ============================ Proposition ============================ */
+// Le client doit comprendre en 10 secondes : ce qu'il a demandé, combien, et ce qu'il peut ajouter.
+const prixOffre = (o, c) => {
+  const parts = [];
+  if (o.ttcP > 0) parts.push(`${eur(o.ttcP)} une fois`);
+  if (o.ttcM > 0) parts.push(`${eur(o.ttcM)} / mois${c.mois ? ` pendant ${c.mois} mois` : ''}`);
+  return parts.join(' + ');
+};
+
 function buildText(s, c, numero) {
   const L = [];
-  const cl = s.client;
-  L.push(`PROPOSITION COMMERCIALE ${numero}`);
-  L.push(`${cl.entreprise || 'Client'}${cl.responsable ? ' · ' + cl.responsable : ''}`);
+  const cl = s.client, t = 1 + num(s.tva) / 100;
+  L.push(`Bonjour${cl.responsable ? ' ' + cl.responsable.split(' ')[0] : ''},`);
   L.push('');
-  const obj = s.reponses.objectif || [];
-  if (obj.length) { L.push('Objectifs : ' + obj.join(', ')); L.push(''); }
-  if (c.ponct.length) {
-    L.push('CRÉATION INITIALE');
-    c.ponct.forEach(p => L.push(`• ${p.nom}${num(p.qte) > 1 ? ' ×' + p.qte : ''} : ${eur(c.line(p))} HT`));
-    if (c.remP) L.push(`Remise : -${eur(c.remP)} HT`);
-    L.push(`Total : ${eur(c.htP)} HT (${eur(c.ttcP)} TTC)`);
+  L.push(`Voici notre proposition pour ${cl.entreprise || 'votre commerce'} (devis ${numero}). Prix TTC.`);
+  c.offres.forEach((o, i) => {
     L.push('');
-  }
-  if (c.mens.length) {
-    L.push('ABONNEMENT MENSUEL');
-    c.mens.forEach(p => L.push(`• ${p.nom} : ${eur(c.line(p))} HT / mois`));
-    if (c.remM) L.push(`Remise : -${eur(c.remM)} HT / mois`);
-    L.push(`Mensualité : ${eur(c.htM)} HT (${eur(c.ttcM)} TTC)`);
+    L.push(`${i === 0 && o.id === 'base' ? '★' : '+'} ${o.nom.toUpperCase()} : ${prixOffre(o, c)}`);
+    o.items.forEach(p => L.push(`   ✓ ${p.nom}${num(p.qte) > 1 ? ' × ' + p.qte : ''}`));
+  });
+  if (c.offres.length > 1) {
     L.push('');
+    L.push(`Si vous prenez tout : ${eur(c.ttcP)} une fois + ${eur(c.ttcM)} / mois (total ${c.mois ? c.mois + ' mois' : '1er mois'} : ${eur(c.totalTTC)}).`);
   }
-  L.push(`Engagement : ${c.mois ? c.mois + ' mois' : 'sans engagement'}`);
-  L.push(`Total ${c.mois ? 'sur ' + c.mois + ' mois' : '1er mois'} : ${eur(c.totalHT)} HT · ${eur(c.totalTTC)} TTC`);
-  if (c.acompte) L.push(`Acompte à la signature : ${eur(c.acompte)} TTC (${s.acompte.pct} %)`);
+  const eco = (c.remP + c.remM * c.moisCalc) * t;
+  if (eco > 0) L.push(`Remise incluse : ${eur(eco)} d'économie.`);
+  L.push('');
   L.push(`Offre valable jusqu'au ${fmtDate(addDays(today(), num(s.validite)))}.`);
-  if (s.visuels.demoUrl) { L.push(''); L.push('Démonstration : ' + s.visuels.demoUrl); }
+  if (s.visuels.demoUrl) L.push('Démonstration : ' + s.visuels.demoUrl);
   const v = s.vendeur;
   if (v.nom || v.telephone) { L.push(''); L.push([v.nom, v.societe, v.telephone, v.email].filter(Boolean).join(' · ')); }
   return L.join('\n');
 }
 
+function Check() {
+  return <svg className="mt-0.5 h-5 w-5 shrink-0 text-emerald-600" viewBox="0 0 20 20" fill="currentColor"><path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.7-9.3a1 1 0 00-1.4-1.4L9 10.6 7.7 9.3a1 1 0 00-1.4 1.4l2 2a1 1 0 001.4 0l4-4z" clipRule="evenodd"/></svg>;
+}
+
+function OffreCard({ o, i, c, principale }) {
+  return (
+    <div className={'avoid-break overflow-hidden rounded-3xl ' + (principale ? 'border-2 border-accent' : 'border border-gray-200')}>
+      <div className={'flex flex-wrap items-start justify-between gap-4 px-5 py-5 sm:px-6 ' + (principale ? 'bg-accent text-white' : 'bg-gray-50')}>
+        <div className="flex min-w-0 items-start gap-3">
+          <span className={'mt-1 grid h-6 w-6 shrink-0 place-items-center rounded-md border-2 ' + (principale ? 'border-white/80' : 'border-gray-400')} aria-hidden="true" />
+          <div className="min-w-0">
+            <p className={'text-xs font-bold uppercase tracking-wider ' + (principale ? 'text-white/75' : 'text-gray-500')}>
+              {principale ? o.tag : `Option ${i} · ${o.tag}`}
+            </p>
+            <p className="font-display text-2xl font-semibold leading-tight">{o.nom}</p>
+            <p className={'mt-1 text-xs ' + (principale ? 'text-white/70' : 'text-gray-500')}>Cochez la case si vous choisissez cette offre.</p>
+          </div>
+        </div>
+        <div className="tabular sm:text-right">
+          {o.ttcP > 0 && <p className="font-display text-[30px] font-semibold leading-none">{eur(o.ttcP)}<span className={'ml-1 text-sm font-sans font-medium ' + (principale ? 'text-white/75' : 'text-gray-500')}>TTC</span></p>}
+          {o.ttcP > 0 && <p className={'text-sm ' + (principale ? 'text-white/75' : 'text-gray-500')}>une seule fois · {eur(o.htP)} HT</p>}
+          {o.ttcM > 0 && <p className={'font-display font-semibold leading-none ' + (o.ttcP > 0 ? 'mt-2 text-xl' : 'text-[30px]')}>{o.ttcP > 0 ? '+ ' : ''}{eur(o.ttcM)}<span className={'ml-1 text-sm font-sans font-medium ' + (principale ? 'text-white/75' : 'text-gray-500')}>TTC / mois</span></p>}
+          {o.ttcM > 0 && <p className={'text-sm ' + (principale ? 'text-white/75' : 'text-gray-500')}>{c.mois ? `pendant ${c.mois} mois` : 'sans engagement'} · {eur(o.htM)} HT</p>}
+        </div>
+      </div>
+      <ul className="divide-y divide-gray-100 px-5 sm:px-6">
+        {o.items.map(p => (
+          <li key={p.id} className="flex gap-3 py-3">
+            <Check />
+            <div className="min-w-0 flex-1">
+              <p className="font-semibold leading-snug">{p.nom}{num(p.qte) > 1 && <span className="font-normal text-gray-500"> × {p.qte}</span>}</p>
+              <p className="text-sm leading-snug text-gray-600">{p.description}</p>
+            </div>
+            {p.type === 'mensuel' && <span className="h-fit shrink-0 rounded-full bg-sky-50 px-2.5 py-1 text-[11px] font-semibold text-sky-800">chaque mois</span>}
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
 function Proposal({ s, c, numero, onClose, toast }) {
   const cl = s.client, v = s.vendeur;
+  const t = 1 + num(s.tva) / 100;
   const obj = s.reponses.objectif || [];
-  const others = QUESTIONS.filter(q => q.id !== 'objectif' && (s.reponses[q.id] || []).length);
-  const packItems = c.sel.filter(p => p.pack);
-  const presentation = s.presentation.trim() ||
-    `${cl.entreprise || 'Votre commerce'}${cl.secteur ? ', ' + cl.secteur.toLowerCase() : ''}, souhaite renforcer sa présence en ligne et attirer davantage de clients. Cette proposition réunit les prestations retenues ensemble lors de notre rendez-vous, avec un budget clair dès le départ.`;
+  const demande = s.reponses.demande || [];
+  const economie = (c.remP + c.remM * c.moisCalc) * t;
+  const validite = fmtDate(addDays(today(), num(s.validite)));
+  const base = c.offres.find(o => o.id === 'base');
+  const options = c.offres.filter(o => o !== base);
+  const DIRE = { 'Shooting photo': 'un shooting photo', 'Vidéos': 'des vidéos', 'Contenus pour mes écrans en boutique': 'des contenus pour vos écrans en boutique',
+    'Site internet': 'un site internet', 'Réseaux sociaux': 'de l\'aide sur vos réseaux sociaux' };
+  const liste = (xs) => xs.length > 1 ? xs.slice(0, -1).join(', ') + ' et ' + xs[xs.length - 1] : xs[0];
+  const intro = base
+    ? `Vous nous avez demandé ${demande.length ? liste(demande.map(d => DIRE[d] || d.toLowerCase())) : liste(base.items.map(p => p.nom.toLowerCase()))}. Voici le prix de votre demande${options.length ? `, puis ${options.length === 1 ? 'une option' : options.length + ' options'} pour aller plus loin, à ajouter seulement si vous le souhaitez` : ''}.`
+    : 'Voici les offres préparées pour vous. Cochez celles que vous choisissez.';
   const text = buildText(s, c, numero);
-  const subject = `Proposition commerciale ${numero}${cl.entreprise ? ' – ' + cl.entreprise : ''}`;
+  const subject = `Votre proposition ${cl.entreprise ? '– ' + cl.entreprise : ''} (${numero})`;
 
   const copy = async () => {
     try { await navigator.clipboard.writeText(text); toast('Récapitulatif copié dans le presse-papiers.'); }
     catch { toast('Copie impossible : sélectionnez le texte manuellement.'); }
   };
   const whatsapp = () => {
-    const n = waNumber(cl.telephone);
-    window.open(`https://wa.me/${n}?text=${encodeURIComponent(text)}`, '_blank');
+    window.open(`https://wa.me/${waNumber(cl.telephone)}?text=${encodeURIComponent(text)}`, '_blank');
     toast('WhatsApp est ouvert avec le message prérempli. Vérifiez-le puis appuyez sur Envoyer.');
   };
   const email = () => {
@@ -361,150 +442,166 @@ function Proposal({ s, c, numero, onClose, toast }) {
     toast('Votre messagerie est ouverte avec le message prérempli. Joignez le PDF puis envoyez.');
   };
 
-  const Row = ({ label, value, strong, muted }) => (
-    <div className={'flex items-baseline justify-between gap-4 py-1.5 ' + (strong ? 'font-semibold' : '') + (muted ? ' text-gray-500' : '')}>
-      <span>{label}</span><span className="tabular">{value}</span>
+  const Line = ({ l, v, strong, minus }) => (
+    <div className={'flex justify-between gap-4 py-1 ' + (strong ? 'font-semibold text-ink' : 'text-gray-600')}>
+      <span>{l}</span><span className={'tabular ' + (minus ? 'text-emerald-700' : '')}>{v}</span>
     </div>
   );
+  const cell = (n) => n > 0 ? eur(n) : '—';
 
   return (
-    <div id="proposal-overlay" className="fixed inset-0 z-50 overflow-y-auto bg-gray-900/40 p-0 backdrop-blur-sm sm:p-6">
+    <div id="proposal-overlay" className="fixed inset-0 z-50 overflow-y-auto bg-gray-900/40 backdrop-blur-sm sm:p-6">
       <div className="no-print sticky top-0 z-10 mx-auto flex max-w-[860px] flex-wrap items-center gap-2 bg-white/95 px-4 py-3 shadow-sm backdrop-blur sm:rounded-t-2xl">
-        <button onClick={onClose} className="rounded-xl px-3 py-2 text-sm font-medium text-gray-600 hover:bg-gray-100">← Retour</button>
+        <button onClick={onClose} className="rounded-xl px-3 py-2 text-sm font-medium text-gray-600 hover:bg-gray-100">← Modifier</button>
         <div className="ml-auto flex flex-wrap gap-2">
-          <button onClick={() => window.print()} className="rounded-xl bg-ink px-4 py-2 text-sm font-semibold text-white">Exporter en PDF</button>
+          <button onClick={() => window.print()} className="rounded-xl bg-ink px-4 py-2 text-sm font-semibold text-white">PDF</button>
           <button onClick={copy} className="rounded-xl border border-gray-200 px-4 py-2 text-sm font-medium">Copier</button>
           <button onClick={whatsapp} className="rounded-xl bg-[#25D366] px-4 py-2 text-sm font-semibold text-white">WhatsApp</button>
           <button onClick={email} className="rounded-xl border border-gray-200 px-4 py-2 text-sm font-medium">Email</button>
         </div>
       </div>
 
-      <article id="proposal" className="mx-auto max-w-[860px] bg-white px-6 py-10 text-[14.5px] leading-relaxed shadow-xl sm:rounded-b-2xl sm:px-12">
-        <header className="avoid-break flex flex-wrap items-start justify-between gap-6 border-b border-gray-200 pb-8">
-          <div>
-            <p className="text-xs font-semibold uppercase tracking-[.18em] text-gray-500">Proposition commerciale</p>
-            <h1 className="mt-2 font-display text-3xl font-semibold leading-tight">{cl.entreprise || 'Votre projet digital'}</h1>
-            <p className="mt-2 text-sm text-gray-500">N° {numero} · {fmtDate(today())} · valable jusqu'au {fmtDate(addDays(today(), num(s.validite)))}</p>
+      <article id="proposal" className="mx-auto max-w-[860px] bg-white px-5 py-8 text-[15px] leading-relaxed shadow-xl sm:rounded-b-2xl sm:px-12 sm:py-10">
+        {/* En-tête */}
+        <header className="avoid-break flex items-start justify-between gap-6">
+          <div className="min-w-0">
+            <p className="text-xs font-semibold uppercase tracking-[.18em] text-gray-500">Proposition · N° {numero} · valable jusqu'au {validite}</p>
+            <h1 className="mt-2 font-display text-[28px] font-semibold leading-tight sm:text-4xl">Votre projet pour {cl.entreprise || 'votre commerce'}</h1>
+            <p className="mt-2 text-gray-600">{[cl.responsable, cl.adresse].filter(Boolean).join(' · ')}</p>
           </div>
-          {s.visuels.logo && <img src={s.visuels.logo} alt="" className="h-16 max-w-[180px] object-contain" />}
+          {s.visuels.logo && <img src={s.visuels.logo} alt="" className="h-16 w-24 shrink-0 rounded-lg object-cover sm:h-20 sm:w-32" />}
         </header>
 
-        <div className="avoid-break grid gap-6 border-b border-gray-200 py-7 sm:grid-cols-2">
-          <div>
-            <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-gray-500">Client</p>
-            <p className="font-semibold">{cl.entreprise || '—'}</p>
-            {cl.responsable && <p>{cl.responsable}</p>}
-            {cl.adresse && <p className="text-gray-600">{cl.adresse}</p>}
-            {(cl.telephone || cl.email) && <p className="text-gray-600">{[cl.telephone, cl.email].filter(Boolean).join(' · ')}</p>}
+        {/* 1. Les offres, chacune avec son prix */}
+        <section className="mt-8">
+          <p className="max-w-2xl text-lg leading-snug text-gray-800">{intro}</p>
+          <p className="mt-1 text-sm text-gray-500">Tous les prix sont affichés TTC, la TVA ({s.tva} %) est comprise.</p>
+          <div className="mt-6 space-y-5">
+            {c.offres.map((o, i) => <OffreCard key={o.id} o={o} i={base ? i : i + 1} c={c} principale={o === base || (!base && i === 0)} />)}
+            {c.offres.length === 0 && <p className="text-gray-500">Aucune prestation sélectionnée.</p>}
           </div>
-          {(v.nom || v.societe) && (
-            <div>
-              <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-gray-500">Votre interlocuteur</p>
-              <p className="font-semibold">{v.nom}</p>
-              {v.societe && <p>{v.societe}</p>}
-              {(v.telephone || v.email) && <p className="text-gray-600">{[v.telephone, v.email].filter(Boolean).join(' · ')}</p>}
-              {v.siret && <p className="text-gray-500">SIRET {v.siret}</p>}
+          {c.offres.length > 1 && (
+            <div className="avoid-break mt-5 flex flex-wrap items-center justify-between gap-3 rounded-2xl bg-gray-900 px-5 py-4 text-white sm:px-6">
+              <p className="font-semibold">Si vous prenez tout</p>
+              <p className="tabular text-right">
+                <span className="font-display text-xl font-semibold">{prixOffre({ ttcP: c.ttcP, ttcM: c.ttcM }, c)}</span>
+                <span className="block text-sm text-white/70">soit {eur(c.totalTTC)} TTC {c.mois ? `sur ${c.mois} mois` : 'le 1er mois'}</span>
+              </p>
             </div>
           )}
-        </div>
-
-        <section className="avoid-break py-7">
-          <h2 className="font-display text-xl font-semibold">Le projet</h2>
-          <p className="mt-2 whitespace-pre-line text-gray-700">{presentation}</p>
-          {obj.length > 0 && (
-            <>
-              <h3 className="mt-5 text-sm font-semibold uppercase tracking-wide text-gray-500">Objectifs identifiés</h3>
-              <ul className="mt-2 grid gap-1.5 sm:grid-cols-2">{obj.map(o => <li key={o} className="flex gap-2"><span className="text-accent">✓</span>{o}</li>)}</ul>
-            </>
-          )}
-          {others.length > 0 && (
-            <dl className="mt-5 grid gap-x-6 gap-y-2 text-sm sm:grid-cols-2">
-              {others.map(q => <div key={q.id}><dt className="text-gray-500">{q.q}</dt><dd className="font-medium">{s.reponses[q.id].join(', ')}</dd></div>)}
-            </dl>
-          )}
+          {economie > 0 && <p className="mt-3 text-sm font-semibold text-emerald-700">✓ Remise déjà déduite : {eur(economie)} TTC d'économie{c.mois ? ` sur ${c.mois} mois` : ''} si vous prenez tout.</p>}
         </section>
 
-        {(s.visuels.photos.length > 0 || s.visuels.demoUrl) && (
-          <section className="avoid-break border-t border-gray-200 py-7">
-            {s.visuels.photos.length > 0 && (
-              <div className="grid grid-cols-3 gap-2">{s.visuels.photos.slice(0, 6).map((ph, i) => <img key={i} src={ph} alt="" className="aspect-[4/3] w-full rounded-lg object-cover" />)}</div>
-            )}
-            {s.visuels.demoUrl && <p className="mt-4 text-sm">Démonstration en ligne : <a href={s.visuels.demoUrl} className="font-medium text-accent underline">{s.visuels.demoUrl}</a></p>}
-          </section>
-        )}
-
-        <section className="border-t border-gray-200 py-7">
-          <h2 className="font-display text-xl font-semibold">Prestations retenues</h2>
-          {packItems.length > 0 && <p className="mt-1 text-sm text-gray-500">Les prestations marquées ◆ composent le {s.packNom}.</p>}
-          {[['Création initiale', c.ponct, ''], ['Abonnement mensuel', c.mens, ' / mois']].map(([t, items, suf]) => items.length > 0 && (
-            <div key={t} className="avoid-break mt-5">
-              <h3 className="text-sm font-semibold uppercase tracking-wide text-gray-500">{t}</h3>
-              <table className="mt-2 w-full border-collapse">
-                <tbody>
-                  {items.map(p => (
-                    <tr key={p.id} className="border-b border-gray-100 align-top">
-                      <td className="py-3 pr-4">
-                        <p className="font-medium">{p.pack && <span className="mr-1 text-accent">◆</span>}{p.nom}{num(p.qte) > 1 && <span className="font-normal text-gray-500"> × {p.qte}</span>}</p>
-                        <p className="text-sm text-gray-600">{p.description}</p>
-                      </td>
-                      <td className="tabular whitespace-nowrap py-3 text-right font-medium">{eur(c.line(p))}{suf}</td>
+        {/* 2. Quand vous payez */}
+        {c.offres.length > 0 && (
+          <section className="avoid-break mt-10">
+            <h2 className="font-display text-2xl font-semibold">Quand vous payez</h2>
+            <p className="mt-1 text-sm text-gray-500">Vous ne payez que les offres que vous cochez.</p>
+            <div className="mt-4 overflow-x-auto rounded-2xl border border-gray-200">
+              <table className="w-full text-[13px] sm:text-sm">
+                <thead className="bg-gray-50 text-left text-xs uppercase tracking-wide text-gray-500">
+                  <tr>
+                    <th className="px-3 py-3 font-semibold sm:px-4">Offre</th>
+                    {s.acompte.actif && c.ttcP > 0 && <th className="px-2 py-3 text-right font-semibold sm:px-3">Commande<span className="block font-normal normal-case">acompte {s.acompte.pct} %</span></th>}
+                    {c.ttcP > 0 && <th className="px-2 py-3 text-right font-semibold sm:px-3">Livraison</th>}
+                    {c.ttcM > 0 && <th className="px-3 py-3 text-right font-semibold sm:px-4">Par mois</th>}
+                  </tr>
+                </thead>
+                <tbody className="tabular divide-y divide-gray-100">
+                  {c.offres.map(o => (
+                    <tr key={o.id}>
+                      <td className="px-3 py-3 font-semibold leading-snug sm:px-4">{o.nom}</td>
+                      {s.acompte.actif && c.ttcP > 0 && <td className="whitespace-nowrap px-2 py-3 text-right sm:px-3">{cell(o.acompte)}</td>}
+                      {c.ttcP > 0 && <td className="whitespace-nowrap px-2 py-3 text-right sm:px-3">{cell(o.ttcP - o.acompte)}</td>}
+                      {c.ttcM > 0 && <td className="whitespace-nowrap px-3 py-3 text-right sm:px-4">{cell(o.ttcM)}</td>}
                     </tr>
                   ))}
                 </tbody>
               </table>
             </div>
-          ))}
-          {c.sel.length === 0 && <p className="mt-3 text-gray-500">Aucune prestation sélectionnée.</p>}
-        </section>
+            <p className="mt-3 whitespace-pre-line text-sm text-gray-600">{s.paiement}</p>
+          </section>
+        )}
 
-        <section className="avoid-break border-t border-gray-200 py-7">
-          <h2 className="font-display text-xl font-semibold">Investissement</h2>
-          <div className="mt-4 grid gap-6 sm:grid-cols-2">
+        {/* 3. Pourquoi */}
+        {(s.presentation.trim() || obj.length > 0) && (
+          <section className="avoid-break mt-10">
+            <h2 className="font-display text-2xl font-semibold">Votre objectif</h2>
+            {s.presentation.trim() && <p className="mt-2 whitespace-pre-line text-gray-700">{s.presentation}</p>}
+            {obj.length > 0 && <div className="mt-3 flex flex-wrap gap-2">{obj.map(o => <span key={o} className="rounded-full bg-gray-100 px-3.5 py-1.5 text-sm font-medium">{o}</span>)}</div>}
+          </section>
+        )}
+
+        {(s.visuels.photos.length > 0 || s.visuels.demoUrl) && (
+          <section className="avoid-break mt-8">
+            {s.visuels.photos.length > 0 && (
+              <div className="grid grid-cols-3 gap-2">{s.visuels.photos.slice(0, 3).map((ph, i) => <img key={i} src={ph} alt="" className="aspect-[4/3] w-full rounded-xl object-cover" />)}</div>
+            )}
+            {s.visuels.demoUrl && (
+              <a href={s.visuels.demoUrl} className="mt-3 flex items-center justify-between gap-3 rounded-2xl border border-gray-200 px-5 py-4 hover:bg-gray-50">
+                <span className="min-w-0"><span className="block font-semibold">Voir la démonstration en ligne</span><span className="block truncate text-sm text-gray-500">{s.visuels.demoUrl}</span></span>
+                <span className="text-xl text-accent">→</span>
+              </a>
+            )}
+          </section>
+        )}
+
+        {/* 4. Détail pour la comptabilité */}
+        <section className="avoid-break mt-10 border-t border-gray-200 pt-8">
+          <h2 className="font-display text-lg font-semibold">Détail du prix (toutes offres)</h2>
+          <div className="mt-3 grid gap-6 text-sm sm:grid-cols-2">
             {c.ponct.length > 0 && (
-              <div className="rounded-xl bg-gray-50 p-5">
-                <p className="text-sm font-semibold">Création initiale</p>
-                <Row label="Sous-total HT" value={eur(c.brutP)} muted={c.remP > 0} />
-                {c.remP > 0 && <Row label={'Remise' + (s.remises.ponctuel.mode === '%' ? ` (${s.remises.ponctuel.valeur} %)` : '')} value={'−' + eur(c.remP)} />}
-                <Row label="Total HT" value={eur(c.htP)} />
-                <Row label={`TVA ${s.tva} %`} value={eur(c.tvaP)} muted />
-                <div className="mt-1 border-t border-gray-200 pt-1"><Row label="Total TTC" value={eur(c.ttcP)} strong /></div>
+              <div>
+                <p className="mb-1 font-semibold">Une seule fois</p>
+                {c.ponct.map(p => <Line key={p.id} l={p.nom + (num(p.qte) > 1 ? ` × ${p.qte}` : '')} v={eur(c.line(p)) + ' HT'} />)}
+                {c.remP > 0 && <Line minus l={'Remise' + (s.remises.ponctuel.mode === '%' ? ` ${s.remises.ponctuel.valeur} %` : '')} v={'− ' + eur(c.remP) + ' HT'} />}
+                <div className="mt-1 border-t border-gray-200 pt-1">
+                  <Line l="Total HT" v={eur(c.htP)} /><Line l={`TVA ${s.tva} %`} v={eur(c.tvaP)} /><Line strong l="Total TTC" v={eur(c.ttcP)} />
+                </div>
               </div>
             )}
             {c.mens.length > 0 && (
-              <div className="rounded-xl bg-gray-50 p-5">
-                <p className="text-sm font-semibold">Mensualité</p>
-                <Row label="Sous-total HT" value={eur(c.brutM)} muted={c.remM > 0} />
-                {c.remM > 0 && <Row label={'Remise' + (s.remises.mensuel.mode === '%' ? ` (${s.remises.mensuel.valeur} %)` : '')} value={'−' + eur(c.remM)} />}
-                <Row label="Total HT / mois" value={eur(c.htM)} />
-                <Row label={`TVA ${s.tva} %`} value={eur(c.tvaM)} muted />
-                <div className="mt-1 border-t border-gray-200 pt-1"><Row label="Total TTC / mois" value={eur(c.ttcM)} strong /></div>
+              <div>
+                <p className="mb-1 font-semibold">Par mois</p>
+                {c.mens.map(p => <Line key={p.id} l={p.nom + (num(p.qte) > 1 ? ` × ${p.qte}` : '')} v={eur(c.line(p)) + ' HT'} />)}
+                {c.remM > 0 && <Line minus l={'Remise' + (s.remises.mensuel.mode === '%' ? ` ${s.remises.mensuel.valeur} %` : '')} v={'− ' + eur(c.remM) + ' HT'} />}
+                <div className="mt-1 border-t border-gray-200 pt-1">
+                  <Line l="Total HT / mois" v={eur(c.htM)} /><Line l={`TVA ${s.tva} %`} v={eur(c.tvaM)} /><Line strong l="Total TTC / mois" v={eur(c.ttcM)} />
+                </div>
               </div>
             )}
           </div>
-          <div className="mt-6 rounded-xl border border-accent/30 bg-accent-soft/50 p-5">
-            <Row label={'Durée d\'engagement'} value={c.mois ? c.mois + ' mois' : 'Sans engagement'} />
-            <Row label={c.mois ? `Total sur ${c.mois} mois` : 'Total 1er mois'} value={`${eur(c.totalHT)} HT · ${eur(c.totalTTC)} TTC`} strong />
-            {c.acompte > 0 && <Row label={`Acompte à la signature (${s.acompte.pct} % de la création)`} value={eur(c.acompte) + ' TTC'} />}
-          </div>
         </section>
 
-        <section className="avoid-break grid gap-6 border-t border-gray-200 py-7 sm:grid-cols-2">
+        {/* 5. Inclus, conditions */}
+        <section className="avoid-break mt-8 grid gap-6 border-t border-gray-200 pt-8 text-sm sm:grid-cols-2">
           {c.mens.length > 0 && s.inclus.trim() && (
             <div>
-              <h3 className="font-display text-lg font-semibold">Maintenance et services inclus</h3>
-              <ul className="mt-2 space-y-1 text-gray-700">{s.inclus.split('\n').filter(Boolean).map(l => <li key={l} className="flex gap-2"><span className="text-accent">✓</span>{l}</li>)}</ul>
+              <p className="font-semibold">Toujours inclus dans les abonnements</p>
+              <ul className="mt-2 space-y-1 text-gray-700">{s.inclus.split('\n').filter(Boolean).map(l => <li key={l} className="flex gap-2"><span className="text-emerald-600">✓</span>{l}</li>)}</ul>
             </div>
           )}
           <div>
-            <h3 className="font-display text-lg font-semibold">Conditions de paiement</h3>
-            <p className="mt-2 whitespace-pre-line text-gray-700">{s.paiement}</p>
-            <p className="mt-3 text-sm text-gray-500">Devis valable {s.validite} jours, jusqu'au {fmtDate(addDays(today(), num(s.validite)))}.</p>
+            <p className="font-semibold">Engagement et validité</p>
+            {c.mens.length > 0 && <p className="mt-2 text-gray-700">{c.mois ? `Abonnements : engagement de ${c.mois} mois à partir de la mise en route.` : 'Abonnements sans engagement : ils s\'arrêtent quand vous le souhaitez.'}</p>}
+            <p className="mt-2 text-gray-700">Cette offre est valable jusqu'au <strong>{validite}</strong>.</p>
           </div>
         </section>
 
-        <section className="avoid-break grid gap-6 border-t border-gray-200 pt-7 sm:grid-cols-2">
-          <div><p className="text-sm text-gray-500">Bon pour accord, date et signature du client</p><div className="mt-2 h-24 rounded-xl border border-dashed border-gray-300" /></div>
-          <div><p className="text-sm text-gray-500">Signature du prestataire</p><div className="mt-2 h-24 rounded-xl border border-dashed border-gray-300" /></div>
+        {/* 6. Accord */}
+        <section className="avoid-break mt-8 grid gap-6 border-t border-gray-200 pt-8 sm:grid-cols-2">
+          <div>
+            <p className="text-sm font-semibold">Bon pour accord</p>
+            <p className="text-sm text-gray-500">Offres choisies (cochées ci-dessus), date et signature</p>
+            <div className="mt-2 h-24 rounded-xl border border-dashed border-gray-300" />
+          </div>
+          <div className="text-sm">
+            <p className="font-semibold">Votre contact</p>
+            {v.nom && <p className="mt-1">{v.nom}{v.societe && v.societe.toLowerCase() !== v.nom.toLowerCase() ? ' · ' + v.societe : ''}</p>}
+            {(v.telephone || v.email) && <p className="text-gray-600">{[v.telephone, v.email].filter(Boolean).join(' · ')}</p>}
+            {v.siret && <p className="text-gray-500">SIRET {v.siret}</p>}
+            <p className="mt-2 text-gray-500">Une question ? Appelez-moi, je vous réponds directement.</p>
+          </div>
         </section>
       </article>
       <div className="no-print h-10" />
@@ -555,12 +652,12 @@ function App() {
 
   const nouveauClient = () => {
     if (!confirm('Commencer un nouveau client ? La fiche, les réponses, la sélection et les visuels seront effacés. Vos tarifs et vos coordonnées sont conservés.')) return;
-    set(p => ({ ...DEFAULTS, client: blankClient, visuels: { logo: '', photos: [], demoUrl: '' }, prestations: p.prestations.map(x => ({ ...x, selected: false, pack: false })), vendeur: p.vendeur,
-      inclus: p.inclus, paiement: p.paiement, validite: p.validite, tva: p.tva, packNom: p.packNom }));
+    set(p => ({ ...DEFAULTS, client: blankClient, visuels: { logo: '', photos: [], demoUrl: '' }, prestations: p.prestations.map(x => ({ ...x, selected: false })), vendeur: p.vendeur,
+      inclus: p.inclus, paiement: p.paiement, validite: p.validite, tva: p.tva, offres: p.offres }));
     setOpen({ client: true });
   };
 
-  const addCustom = (type) => set(p => ({ prestations: [...p.prestations, { id: 'perso-' + Date.now(), type, nom: 'Nouvelle prestation', description: 'Description de la prestation', prix: 0, qte: 1, unite: '', selected: true, pack: false }] }));
+  const addCustom = (type) => set(p => ({ prestations: [...p.prestations, { id: 'perso-' + Date.now(), type, nom: 'Nouvelle prestation', description: 'Description de la prestation', prix: 0, qte: 1, unite: '', selected: true, offre: 'base' }] }));
 
   const answered = QUESTIONS.filter(q => (s.reponses[q.id] || []).length || (s.notes[q.id] || '').trim());
   const clientHint = [s.client.entreprise, s.client.responsable].filter(Boolean).join(' · ') || 'Coordonnées du commerçant';
@@ -682,17 +779,30 @@ function App() {
                 </div>
                 <div className="grid gap-3 lg:grid-cols-2">
                   {s.prestations.filter(p => p.type === type).map(p => (
-                    <PrestationCard key={p.id} p={p} suggested={sugg.has(p.id)} onChange={patch => setPrest(p.id, patch)}
+                    <PrestationCard key={p.id} p={p} offres={s.offres || OFFRES} suggested={sugg.has(p.id)} onChange={patch => setPrest(p.id, patch)}
                       onRemove={p.id.startsWith('perso-') ? () => set(prev => ({ prestations: prev.prestations.filter(x => x.id !== p.id) })) : null} />
                   ))}
                 </div>
                 <button onClick={() => addCustom(type)} className="mt-3 text-sm font-medium text-accent hover:underline">+ Ajouter une prestation {type === 'mensuel' ? 'mensuelle' : 'ponctuelle'}</button>
               </div>
             ))}
-            <div className="mt-6 flex flex-wrap items-center gap-3 rounded-2xl bg-gray-50 p-4">
-              <span className="text-sm text-gray-600">Nom du pack :</span>
-              <input className={inputCls + ' w-56'} value={s.packNom} onChange={e => set({ packNom: e.target.value })} />
-              <span className="text-sm text-gray-500">{c.sel.filter(p => p.pack).length} prestation(s) dans le pack</span>
+            <div className="mt-6 rounded-2xl bg-gray-50 p-4 sm:p-5">
+              <p className="font-display text-lg font-semibold">Les offres de la proposition</p>
+              <p className="mb-4 text-sm text-gray-500">Chaque offre apparaît séparément, avec son prix, et le client coche celles qu'il choisit.</p>
+              <div className="space-y-3">
+                {(s.offres || OFFRES).map((o, i) => {
+                  const r = c.offres.find(x => x.id === o.id);
+                  return (
+                    <div key={o.id} className="grid gap-2 sm:grid-cols-[1fr_1.4fr_auto] sm:items-center">
+                      <input className={inputCls + ' font-semibold'} value={o.nom} aria-label={'Nom de l\'offre ' + (i + 1)}
+                        onChange={e => set(p => ({ offres: (p.offres || OFFRES).map(x => x.id === o.id ? { ...x, nom: e.target.value } : x) }))} />
+                      <input className={inputCls + ' text-sm'} value={o.tag} aria-label="Phrase d'accroche"
+                        onChange={e => set(p => ({ offres: (p.offres || OFFRES).map(x => x.id === o.id ? { ...x, tag: e.target.value } : x) }))} />
+                      <span className="tabular text-sm text-gray-600 sm:text-right">{r ? `${r.items.length} presta. · ${eur(r.ttcP)} + ${eur(r.ttcM)}/mois TTC` : 'vide'}</span>
+                    </div>
+                  );
+                })}
+              </div>
             </div>
           </Section>
 
