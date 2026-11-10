@@ -3414,7 +3414,7 @@ function PageMenu() {
 
 /* ============================ Collecte client : portail, synchronisation, fiche en 8 rubriques ============================ */
 const RUBRIQUES_COLLECTE = {
-  entreprise: { titre: 'Entreprise et coordonnées', champs: [['nomCommercial', 'Nom commercial'], ['raisonSociale', 'Raison sociale'], ['siret', 'SIRET'], ['gerant', 'Nom du gérant'], ['telephone', 'Téléphone'], ['email', 'Email'], ['adresse', 'Adresse'], ['horaires', 'Horaires d\'ouverture', 'textarea'], ['activite', 'Votre activité en quelques mots', 'textarea']] },
+  entreprise: { titre: 'Entreprise et coordonnées', champs: [['nomCommercial', 'Nom commercial'], ['raisonSociale', 'Raison sociale'], ['siret', 'SIRET'], ['gerant', 'Votre nom (personne à contacter)'], ['telephone', 'Téléphone'], ['email', 'Email'], ['adresse', 'Adresse'], ['horaires', 'Horaires d\'ouverture', 'textarea'], ['activite', 'Votre activité en quelques mots', 'textarea']] },
   site: { titre: 'Site internet', champs: [['domaine', 'Nom de domaine (existant ou souhaité)'], ['siteActuel', 'Site actuel (lien)'], ['hebergeur', 'Hébergeur actuel'], ['pages', 'Pages souhaitées', 'textarea'], ['couleurs', 'Couleurs, ambiance'], ['exemples', 'Sites que vous aimez (liens)', 'textarea']] },
   planning: { titre: 'Planning de production', champs: [['dispos', 'Vos disponibilités pour le tournage', 'textarea'], ['datesCles', 'Dates importantes (ouverture, fêtes, promotions)', 'textarea'], ['delai', 'Délai souhaité pour la mise en ligne']] },
 };
@@ -3459,8 +3459,8 @@ function serveurLocal(p) {
   const s = { clients: {}, reponses: [], fichiers: [], ...(lireJSON(LOCAL_SRV) || {}) }, now = new Date().toISOString();
   const ok = (o) => { ecrireJSON(LOCAL_SRV, s); return { ok: true, ...o }; };
   if (p.action === 'ping') return { ok: true, admin: true, local: true };
-  if (p.action === 'register') { s.clients[p.token] = p.client; s.vendeurs = { ...(s.vendeurs || {}), [p.token]: p.vendeur || {} }; return ok({}); }
-  if (p.action === 'infoPortail') return s.clients[p.token] ? { ok: true, client: s.clients[p.token], vendeur: ((s.vendeurs || {})[p.token] || {}).nom || '', tel: ((s.vendeurs || {})[p.token] || {}).tel || '' } : { ok: false, erreur: 'lien de portail invalide' };
+  if (p.action === 'register') { s.clients[p.token] = p.client; s.vendeurs = { ...(s.vendeurs || {}), [p.token]: p.vendeur || {} }; s.prerempli = { ...(s.prerempli || {}), [p.token]: p.prerempli || {} }; return ok({}); }
+  if (p.action === 'infoPortail') return s.clients[p.token] ? { ok: true, client: s.clients[p.token], vendeur: ((s.vendeurs || {})[p.token] || {}).nom || '', tel: ((s.vendeurs || {})[p.token] || {}).tel || '', prerempli: (s.prerempli || {})[p.token] || {} } : { ok: false, erreur: 'lien de portail invalide' };
   s.docs = s.docs || {};
   if (p.action === 'stocker') { const id = nouvelId().slice(0, 10); s.docs[id] = { contenu: p.contenu, sig: null }; return ok({ id }); }
   if (p.action === 'lire') return s.docs[p.id] ? { ok: true, contenu: s.docs[p.id].contenu, sig: s.docs[p.id].sig } : { ok: false, erreur: 'devis introuvable' };
@@ -3499,7 +3499,8 @@ async function assurerJeton(id) {
   const conf = confPortail();
   const token = c.token || (nouvelId() + nouvelId() + nouvelId()).slice(0, 24);
   const vi = vendeurInfo((lireJSON(IDX) || {}).vendeur || st.vendeur || {});
-  const r = await appelPortail(conf.url, { action: 'register', token, client: (st.client || {}).entreprise || 'Client', key: conf.cle, vendeur: { nom: vi.nom, tel: vi.tel } });
+  const sl = load(st), prerempli = { rubriques: Object.fromEntries(Object.entries(RUBRIQUES_COLLECTE).map(([rub, d]) => [rub, Object.fromEntries(d.champs.map(([k]) => [k, String(lireChamp(sl, rub, k) || '')]).filter(([, x]) => x))])) };
+  const r = await appelPortail(conf.url, { action: 'register', token, client: (st.client || {}).entreprise || 'Client', key: conf.cle, vendeur: { nom: vi.nom, tel: vi.tel }, prerempli });
   if (!r.ok) return { ok: false, erreur: r.erreur };
   if (!c.token) { st.collecte = { ...c, token, lienCree: new Date().toISOString() }; sauverDossier(id, st); }
   return { ok: true, token };
@@ -3866,13 +3867,19 @@ function PagePortailCourt({ hash }) {
   useEffect(() => { appelPortail(u, { action: 'infoPortail', token: t }, true).then(setEtat); }, []);
   if (!etat) return <div className="grid min-h-screen place-items-center text-gray-500">Chargement de votre espace…</div>;
   if (!etat.ok) return <div className="mx-auto max-w-md p-8 text-center"><p className="font-semibold">Ce lien n'est plus valable.</p><p className="text-sm text-gray-600">Demandez à votre prestataire de vous le renvoyer.</p></div>;
-  return <PagePortail hash="" confLue={{ u, t, n: etat.client, v: etat.vendeur, tel: etat.tel }} />;
+  return <PagePortail hash="" confLue={{ u, t, n: etat.client, v: etat.vendeur, tel: etat.tel, pre: etat.prerempli || {} }} />;
 }
 
 function PagePortail({ hash, confLue }) {
   const conf = useMemo(() => confLue || lire(hash.slice('#portail='.length)), [hash]);
   const cleBrouillon = 'portail-brouillon-' + (conf && conf.t);
-  const [d, setD] = useState(() => { try { return { rubriques: {}, produits: [], acces: [], fichiers: [], ...(JSON.parse(localStorage.getItem(cleBrouillon) || 'null') || {}) }; } catch { return { rubriques: {}, produits: [], acces: [], fichiers: [] }; } });
+  const [d, setD] = useState(() => {
+    let b = null; try { b = JSON.parse(localStorage.getItem(cleBrouillon) || 'null'); } catch {}
+    const base = { rubriques: {}, produits: [], acces: [], fichiers: [], ...(b || {}) };
+    const pre = ((conf && conf.pre) || {}).rubriques || {};
+    Object.entries(pre).forEach(([rub, ch]) => { base.rubriques[rub] = { ...ch, ...Object.fromEntries(Object.entries(base.rubriques[rub] || {}).filter(([, x]) => String(x || '').trim())) }; });
+    return base;
+  });
   const [etape, setEtape] = useState(0), [msg, setMsg] = useState(''), [envoi, setEnvoi] = useState(''), [fini, setFini] = useState(false);
   useEffect(() => { try { localStorage.setItem(cleBrouillon, JSON.stringify(d)); } catch {} }, [d]);
   if (!conf || !conf.t) return <div className="mx-auto max-w-md p-8 text-center"><p className="font-semibold">Ce lien est incomplet.</p><p className="text-sm text-gray-600">Demandez à votre prestataire de vous le renvoyer.</p></div>;
