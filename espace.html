@@ -1532,8 +1532,6 @@ function PageSignature({ hash, doc }) {
   );
 }
 
-if (MODE_CLIENT) document.title = 'Espace client';
-
 function PageEspaceNeutre() {
   return <div className="grid min-h-screen place-items-center bg-gray-50 px-6 text-center"><div className="max-w-sm">
     <p className="font-display text-2xl font-bold">Espace client</p>
@@ -1541,6 +1539,7 @@ function PageEspaceNeutre() {
 }
 
 function Racine() {
+  if (MODE_CLIENT) document.title = 'Espace client';
   const [hash, setHash] = useState(location.hash);
   useEffect(() => { const f = () => setHash(location.hash); window.addEventListener('hashchange', f); return () => window.removeEventListener('hashchange', f); }, []);
   const routeClient = /^#(signer=|s=|p=|portail=)/.test(hash);
