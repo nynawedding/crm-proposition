@@ -1503,7 +1503,8 @@ function PageSignature({ hash }) {
 function Racine() {
   const [hash, setHash] = useState(location.hash);
   useEffect(() => { const f = () => setHash(location.hash); window.addEventListener('hashchange', f); return () => window.removeEventListener('hashchange', f); }, []);
-  const [crm] = useState(() => (hash.startsWith('#signer=') || hash.startsWith('#signe=') ? null : initCRM()));
+  const [crm] = useState(() => (hash.startsWith('#signer=') || hash.startsWith('#signe=') || hash.startsWith('#portail=') ? null : initCRM()));
+  if (hash.startsWith('#portail=')) return <PagePortail hash={hash} />;
   if (hash.startsWith('#signer=') || hash.startsWith('#signe=')) return <PageSignature key={hash} hash={hash} />;
   if (!crm && !lireJSON(IDX)) return <App />; // reprise impossible : l'ancien CRM reste utilisable tel quel
   const m = hash.match(/^#\/c\/([\w-]+)(\/proposition)?/);
@@ -1518,6 +1519,7 @@ function Racine() {
   if (hash.startsWith('#/depenses')) return <PageDepenses />;
   if (hash.startsWith('#/stats')) return <PageStats />;
   if (hash.startsWith('#/menu')) return <PageMenu />;
+  if (hash.startsWith('#/reglages')) return <PageReglages />;
   return <Dashboard />;
 }
 
@@ -2298,7 +2300,7 @@ function indicateurs(ds, periode) {
 }
 
 // Navigation latérale (ordinateur) et barre du bas (téléphone)
-const NAV = [['#/', 'Tableau de bord', '◧', 'dashboard'], ['#/clients', 'Clients', '☰', 'clients'], ['#/pipeline', 'Pipeline', '⇶', 'pipeline'], ['#/commandes', 'Commandes', '▣', 'commandes'], ['#/factures', 'Factures', '€', 'factures'], ['#/abonnements', 'Abonnements', '↻', 'abonnements'], ['#/depenses', 'Dépenses', '−', 'depenses'], ['#/stats', 'Statistiques', '▤', 'stats']];
+const NAV = [['#/', 'Tableau de bord', '◧', 'dashboard'], ['#/clients', 'Clients', '☰', 'clients'], ['#/pipeline', 'Pipeline', '⇶', 'pipeline'], ['#/commandes', 'Commandes', '▣', 'commandes'], ['#/factures', 'Factures', '€', 'factures'], ['#/abonnements', 'Abonnements', '↻', 'abonnements'], ['#/depenses', 'Dépenses', '−', 'depenses'], ['#/stats', 'Statistiques', '▤', 'stats'], ['#/reglages', 'Réglages', '⚙', 'reglages']];
 function Shell({ page, children }) {
   const vi = vendeurInfo((lireJSON(IDX) || {}).vendeur || {});
   const actif = (h) => (h === '#/menu' ? page === 'menu' : (NAV.find(n => n[0] === h) || [])[3] === page);
@@ -2336,6 +2338,9 @@ function Dashboard() {
   const [idx] = useState(() => rafraichirIndex() || lireJSON(IDX));
   const [periode, setPeriode] = useState(() => { try { return localStorage.getItem('crm-periode') || 'mois'; } catch { return 'mois'; } });
   const choisir = (p) => { setPeriode(p); try { localStorage.setItem('crm-periode', p); } catch {} };
+  // réponses des portails clients : vérifiées à l'ouverture (au plus toutes les 10 minutes)
+  const [maj, setMaj] = useState(0);
+  useEffect(() => { const i = lireJSON(IDX) || {}; if (confPortail().url && Date.now() - new Date(i.portailSync || 0) > 6e5) synchroniserPortail().then(r => { if (r.ok && r.n) setMaj(x => x + 1); }); }, []);
   const ds = idx.dossiers.map(d => ({ ...d, etape: normEtape(d.etape) }));
   const k = indicateurs(ds, periode), auj = isoJour();
   const fin = lireFinance();
@@ -2356,7 +2361,7 @@ function Dashboard() {
           <Periode value={periode} onChange={choisir} />
         </div>
         <section>
-          <ListeAlertes />
+          <ListeAlertes key={maj} />
         </section>
         <section>
           <p className="mb-2 text-xs font-bold uppercase tracking-wider text-gray-500">L'essentiel</p>
@@ -2455,13 +2460,22 @@ function Pipeline() {
 // Fiche client 360°
 function Fiche360({ id }) {
   const [st, setSt] = useState(() => load(lireJSON(DK(id))));
-  const [msg, setMsg] = useState(''), [ouvert, setOuvert] = useState({ relation: true, devis: true });
+  const [msg, setMsg] = useState(''), [ouvert, setOuvert] = useState({});
   const [contact, setContact] = useState({ nom: '', role: '', tel: '' });
-  const toast = (m) => { setMsg(m); setTimeout(() => setMsg(''), 4000); };
+  const [sync, setSync] = useState(false);
+  const toast = (m) => { setMsg(m); setTimeout(() => setMsg(''), 4500); };
   const set = (patch) => setSt(p => ({ ...p, ...(typeof patch === 'function' ? patch(p) : patch) }));
   useEffect(() => { try { const r = sauverDossier(id, st); if (r && r !== st && Object.keys(r.signes || {}).length !== Object.keys(st.signes || {}).length) setSt(r); } catch { toast('Mémoire pleine : enregistrement impossible.'); } }, [st]);
+  // nouvelles réponses du portail : récupérées à l'ouverture de la fiche
+  const recuperer = async (silencieux) => {
+    if (!(collecteDe(lireJSON(DK(id)) || {})).token) return;
+    setSync(true); const r = await synchroniserPortail([id]); setSync(false);
+    if (!r.ok) { if (!silencieux) toast('Portail : ' + r.erreur); return; }
+    if (r.n) { setSt(load(lireJSON(DK(id)))); toast(`${r.n} nouvelle(s) information(s) reçue(s) du client.`); } else if (!silencieux) toast('Aucune nouvelle réponse.');
+  };
+  useEffect(() => { recuperer(true); }, []);
   FRANCHISE = num(st.tva) === 0;
-  const cl = st.client || {}, su = st.suivi || {}, e = entreeDe(id, st), et = etapeDe(e.etape);
+  const cl = st.client || {}, su = st.suivi || {}, e = entreeDe(id, st), et = etapeDe(e.etape), col = collecteDe(st), ec = etatCollecte(st);
   const signesL = e.signesListe || [];
   const caSigne = signesL.reduce((a, x) => a + valeurContrat(x), 0), mrr = signesL.reduce((a, x) => a + x.M, 0);
   const numero = su.numero || '';
@@ -2469,114 +2483,120 @@ function Fiche360({ id }) {
   const prop = '#/c/' + id + '/proposition';
   const [fin, majFin] = useFinance();
   const [paie, setPaie] = useState(false);
-  const cmds = fin.commandes.filter(c => c.dossierId === id), facts = fin.factures.filter(x => x.dossierId === id);
+  const cmds = fin.commandes.filter(c => c.dossierId === id), facts = fin.factures.filter(x => x.dossierId === id), abos = (fin.abonnements || []).filter(a => a.dossierId === id);
   const solde = soldesClients(fin)[id] || { facture: 0, encaisse: 0, solde: 0, retard: 0 };
   const sansCommande = signesL.filter(x => !cmds.some(c => c.devisNumero === x.numero));
   const nouvelleCommande = (n) => { const cid = creerCommande(majFin, id, n); if (cid) location.hash = '#/commande/' + cid; else toast('Devis introuvable.'); };
-  // une seule action principale, selon la situation
+  const ouvrir = (k) => { setOuvert(o => ({ ...o, [k]: true })); setTimeout(() => document.getElementById('rub-' + k)?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 50); };
   const action = (() => {
+    if (col.aValider.length) return { l: `Vérifier ${col.aValider.length} information(s) proposée(s) par le client`, f: () => document.getElementById('preparation')?.scrollIntoView({ behavior: 'smooth' }) };
     if (sansCommande.length) return { l: `Créer la commande (devis ${sansCommande[0].numero})`, f: () => nouvelleCommande(sansCommande[0].numero) };
     if (e.etape === 'signe' && !signesL.length && !cmds.length) return { l: 'Créer la commande à partir du devis en cours', f: () => confirm('Aucun devis signé électroniquement : créer la commande à partir du devis en cours ?') && nouvelleCommande(numero) };
     if (solde.retard > 0) return { l: `Relancer l'impayé (${eurC(solde.retard)})`, h: cl.telephone ? 'tel:' + cl.telephone.replace(/\s/g, '') : '#/factures' };
     const brouillonF = facts.find(x => x.statut === 'brouillon'); if (brouillonF) return { l: 'Finaliser et émettre la facture', h: '#/facture/' + brouillonF.id };
     const cmdNonFact = cmds.find(c => c.netP > 0 && !facts.some(x => x.commandeId === c.id)); if (cmdNonFact) return { l: `Facturer la commande ${cmdNonFact.numero}`, h: '#/commande/' + cmdNonFact.id };
-    if (solde.solde > 0) return { l: `Enregistrer un paiement (reste ${eurC(solde.solde)})`, f: () => { setOuvert(o => ({ ...o, factures: true })); setPaie(true); } };
+    if (solde.solde > 0) return { l: `Enregistrer un paiement (reste ${eurC(solde.solde)})`, f: () => { ouvrir('facturation'); setPaie(true); } };
+    if (e.etape === 'signe' && ec.manquants.length) return { l: `Collecter les éléments du projet (${ec.pct} %)`, f: () => document.getElementById('preparation')?.scrollIntoView({ behavior: 'smooth' }) };
     if (e.etape === 'signe') return sig ? { l: '+ Nouveau devis (avenant) depuis la proposition', h: prop } : { l: 'Ouvrir la proposition', h: prop };
     if (e.etape === 'perdu') return { l: 'Relancer ce prospect', f: () => { changerEtapeDossier(id, 'a_contacter') && setSt(load(lireJSON(DK(id)))); } };
     if (env && !sig) return { l: '📞 Relancer pour la signature', h: cl.telephone ? 'tel:' + cl.telephone.replace(/\s/g, '') : prop };
-    if (e.etape === 'a_contacter') return { l: cl.telephone ? '📞 Appeler pour fixer un rendez-vous' : 'Fixer un rendez-vous', h: cl.telephone ? 'tel:' + cl.telephone.replace(/\s/g, '') : undefined, f: cl.telephone ? undefined : () => { setOuvert(o => ({ ...o, relation: true })); document.getElementById('rdv-date')?.focus(); } };
+    if (e.etape === 'a_contacter') return { l: cl.telephone ? '📞 Appeler pour fixer un rendez-vous' : 'Fixer un rendez-vous', h: cl.telephone ? 'tel:' + cl.telephone.replace(/\s/g, '') : undefined, f: cl.telephone ? undefined : () => ouvrir('commercial') };
     if (e.etape === 'rdv') return { l: 'Préparer la proposition', h: prop };
     return { l: '✍ Faire signer le devis', h: prop };
   })();
-  // appelée comme une fonction (pas <Section/>) pour que les champs gardent le focus
-  const section = (k, n, titre, children, bientot) => (
-    <div className="rounded-2xl bg-white ring-1 ring-black/5">
-      <button onClick={() => setOuvert(o => ({ ...o, [k]: !o[k] }))} className="flex w-full items-center gap-3 px-4 py-3.5 text-left">
-        <span className="grid h-7 w-7 place-items-center rounded-full bg-gray-100 text-sm font-bold">{n}</span>
-        <span className="flex-1 font-semibold">{titre}</span>
-        {bientot && <span className="rounded-full bg-gray-100 px-2 py-0.5 text-[11px] font-semibold text-gray-500">{bientot}</span>}
-        <span className="text-gray-400">{ouvert[k] ? '▴' : '▾'}</span>
-      </button>
-      {ouvert[k] && <div className="border-t border-gray-100 px-4 py-4">{children}</div>}
-    </div>
-  );
+  // rubrique : appelée comme une fonction pour que les champs gardent le focus
+  const rubrique = (k, n, titre, resume, children) => {
+    const nouveau = col.nouveau && col.nouveau[k];
+    return (
+      <div id={'rub-' + k} className="scroll-mt-4 rounded-2xl bg-white ring-1 ring-black/5">
+        <button onClick={() => { setOuvert(o => ({ ...o, [k]: !o[k] })); if (nouveau) set(p => { const cc = collecteDe(p), nv = { ...cc.nouveau, [k]: false }; return { ...p, collecte: { ...cc, nouveau: nv, nonLu: Object.values(nv).some(Boolean) ? cc.nonLu : 0 } }; }); }} className="flex w-full items-center gap-3 px-4 py-3.5 text-left">
+          <span className="grid h-7 w-7 shrink-0 place-items-center rounded-full bg-gray-100 text-sm font-bold">{n}</span>
+          <span className="min-w-0 flex-1"><span className="block font-semibold">{titre}</span>{resume && <span className="block truncate text-xs text-gray-500">{resume}</span>}</span>
+          {nouveau && <span className="rounded-full bg-violet-600 px-2 py-0.5 text-[11px] font-bold text-white">Nouveau</span>}
+          <span className="text-gray-400">{ouvert[k] ? '▴' : '▾'}</span>
+        </button>
+        {ouvert[k] && <div className="border-t border-gray-100 px-4 py-4">{children}</div>}
+      </div>
+    );
+  };
   const contacts = su.contacts || [];
   const ajouterContact = () => { if (!contact.nom.trim()) return; set(p => ({ suivi: { ...(p.suivi || {}), contacts: [...((p.suivi || {}).contacts || []), { ...contact, nom: contact.nom.trim() }] } })); setContact({ nom: '', role: '', tel: '' }); };
-  const lienSigne = (numeroS, sg) => sg && sg.payload ? `#signe=${sg.payload}.${LZString.compressToEncodedURIComponent(JSON.stringify({ nom: sg.nom, traits: sg.traits, quand: sg.quand }))}` : null;
+  const lienSigne = (sg) => sg && sg.payload ? `#signe=${sg.payload}.${LZString.compressToEncodedURIComponent(JSON.stringify({ nom: sg.nom, traits: sg.traits, quand: sg.quand }))}` : null;
+  const derniere = [col.derniereReponse, ...(su.historique || []).map(h => h.date), ...(col.journal || []).map(j => j.date)].filter(Boolean).sort().pop();
+  const pr = su.prochaine || {};
+  const histoTout = [...(su.historique || []).map(h => ({ date: h.date, txt: `${TYPES_ECHANGE[h.type] || ''} ${h.texte}`, auto: h.type === 'auto' })),
+    ...(col.journal || []).map(j => ({ date: j.date, txt: `${j.origine === 'client' ? '📥 Client' : '✎ CRM'} · ${j.champ}${j.apres !== undefined && j.apres !== '' ? ' : ' + (j.avant ? `« ${String(j.avant).slice(0, 40)} » → ` : '') + `« ${String(j.apres).slice(0, 60)} »` : ''}`, auto: false }))].sort((a, b) => b.date.localeCompare(a.date));
+  const taches = cmds.flatMap(c => c.taches.map(t => ({ ...t, cmd: c })));
   return (
     <Shell page="clients">
-      <div className="mx-auto max-w-4xl space-y-4 px-4 pb-28 pt-5 sm:px-6">
+      <div className="mx-auto max-w-4xl space-y-3 px-4 pb-28 pt-5 sm:px-6">
         <a href="#/clients" className="text-sm font-medium text-gray-500 hover:text-ink">← Clients</a>
         <div className="rounded-3xl bg-white p-5 ring-1 ring-black/5">
           <div className="flex flex-wrap items-start justify-between gap-3">
             <div className="min-w-0">
               <h1 className="font-display text-2xl font-bold leading-tight sm:text-3xl">{cl.entreprise || 'Sans nom'}</h1>
-              <p className="text-sm text-gray-500">{[cl.responsable, fmtTel(cl.telephone), cl.email, villeDe(cl.adresse)].filter(Boolean).join(' · ') || 'Coordonnées à compléter'}</p>
+              <p className="text-sm text-gray-500">{[cl.responsable, fmtTel(cl.telephone), villeDe(cl.adresse)].filter(Boolean).join(' · ') || 'Coordonnées à compléter'}</p>
             </div>
             <span className="rounded-full px-3 py-1 text-xs font-bold text-white" style={{ background: et.coul }}>{et.label}</span>
           </div>
-          <div className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-4">
-            {[['CA signé', caSigne ? eur(caSigne) : '—'], ['Encaissé', eurC(solde.encaisse)], ['Solde à recevoir', solde.solde ? eurC(solde.solde) + (solde.retard ? ' ⚠' : '') : '—'], ['Abonnements actifs', (() => { const ab = (fin.abonnements || []).filter(a => a.dossierId === id && a.statut === 'actif'); return ab.length ? eurC(ab.reduce((s, a) => s + a.montantM, 0)) + '/mois' : mrr ? eur(mrr) + '/mois (devis)' : '—'; })()]].map(([l, v]) => (
-              <div key={l} className="rounded-xl bg-gray-50 px-3 py-2"><p className="text-[11px] font-bold uppercase tracking-wider text-gray-500">{l}</p><p className="tabular font-semibold">{v}</p></div>
-            ))}
+          <div className="mt-4 grid gap-2 sm:grid-cols-3">
+            <button onClick={() => document.getElementById('preparation')?.scrollIntoView({ behavior: 'smooth' })} className="rounded-xl bg-violet-50 px-3 py-2 text-left text-violet-900"><p className="text-[11px] font-bold uppercase tracking-wider opacity-70">Collecte</p>
+              <p className="font-semibold">{ec.pct} % {col.nonLu > 0 && <span className="ml-1 rounded-full bg-violet-600 px-1.5 text-[11px] text-white">{col.nonLu} nouveau(x)</span>}</p><span className="mt-1 block h-1.5 overflow-hidden rounded-full bg-violet-100"><span className="block h-full bg-violet-600" style={{ width: ec.pct + '%' }} /></span></button>
+            <div className="rounded-xl bg-gray-50 px-3 py-2"><p className="text-[11px] font-bold uppercase tracking-wider text-gray-500">Dernière activité</p><p className="font-semibold">{derniere ? jourCourt(derniere) : '—'}</p></div>
+            <div className="rounded-xl bg-gray-50 px-3 py-2"><p className="text-[11px] font-bold uppercase tracking-wider text-gray-500">Prochaine action</p><p className={'truncate font-semibold ' + (pr.date && pr.date < isoJour() ? 'text-red-600' : '')}>{pr.action ? `${pr.action}${pr.date ? ' · ' + jourCourt(pr.date) : ''}` : '—'}</p></div>
           </div>
           {action.h ? <a href={action.h} className="mt-4 block rounded-xl bg-accent py-3 text-center text-[15px] font-semibold text-white">{action.l}</a>
             : <button onClick={action.f} className="mt-4 w-full rounded-xl bg-accent py-3 text-[15px] font-semibold text-white">{action.l}</button>}
         </div>
 
-        {section('relation', '1', 'Relation commerciale', <>
-          <BandeauDossier s={st} set={set} toast={toast} numero={numero} />
-          <div className="mt-4">
-            <p className="text-sm font-semibold">Contacts</p>
-            <ul className="mt-1 text-sm">
-              {cl.responsable && <li className="py-1">{cl.responsable} <span className="text-gray-500">· contact principal{cl.telephone ? ' · ' + fmtTel(cl.telephone) : ''}</span></li>}
-              {contacts.map((x, i) => <li key={i} className="flex items-center gap-2 py-1"><span>{x.nom} <span className="text-gray-500">{[x.role, fmtTel(x.tel)].filter(Boolean).map(v => '· ' + v).join(' ')}</span></span>
-                <button onClick={() => set(p => ({ suivi: { ...p.suivi, contacts: contacts.filter((_, j) => j !== i) } }))} className="ml-auto text-xs text-gray-400 hover:text-red-600">Retirer</button></li>)}
-            </ul>
-            <div className="mt-2 flex flex-wrap gap-2">
-              <input value={contact.nom} onChange={ev => setContact({ ...contact, nom: ev.target.value })} placeholder="Nom" className="min-w-[120px] flex-1 rounded-lg border border-gray-200 px-3 py-1.5 text-sm" />
-              <input value={contact.role} onChange={ev => setContact({ ...contact, role: ev.target.value })} placeholder="Rôle (associé, comptable…)" className="min-w-[120px] flex-1 rounded-lg border border-gray-200 px-3 py-1.5 text-sm" />
-              <input value={contact.tel} onChange={ev => setContact({ ...contact, tel: ev.target.value })} placeholder="Téléphone" inputMode="tel" className="w-36 rounded-lg border border-gray-200 px-3 py-1.5 text-sm" />
-              <button onClick={ajouterContact} className="rounded-lg bg-gray-100 px-3 py-1.5 text-sm font-semibold">+ Ajouter</button>
-            </div>
-            <p className="mt-3 text-xs text-gray-500">Fiche complète (adresse, email, questionnaire de découverte) : <a href={prop} className="underline">ouvrir la proposition</a>.</p>
-          </div>
-        </>)}
+        <div id="preparation" className="scroll-mt-4"><Preparation st={st} set={set} id={id} toast={toast} onSync={() => recuperer(false)} sync={sync} /></div>
 
-        {section('devis', '2', 'Devis et contrats', <>
-          <div className="space-y-2 text-sm">
-            <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl bg-gray-50 px-3 py-2.5">
-              <span><b>Devis en cours N° {numero}</b> · {e.chiffre && (e.montantP || e.montantM) ? [e.montantP > 0 && eur(e.montantP), e.montantM > 0 && eur(e.montantM) + '/mois'].filter(Boolean).join(' + ') : 'pas encore chiffré'}
-                <span className="text-gray-500"> · {sig ? 'signé' : env ? `lien envoyé le ${jourCourt(env.date)}` : 'non envoyé'}</span></span>
-              <a href={prop} className="rounded-lg bg-ink px-3 py-1.5 font-semibold text-white">Ouvrir</a>
-            </div>
-            {signesL.length > 0 && <p className="pt-2 text-xs font-bold uppercase tracking-wider text-gray-500">Contrats signés</p>}
-            {signesL.map(x => { const h = lienSigne(x.numero, (st.signes || {})[x.numero]); return (
-              <div key={x.numero} className="flex flex-wrap items-center justify-between gap-2 rounded-xl bg-emerald-50 px-3 py-2.5 text-emerald-900">
-                <span>✓ <b>{x.numero}</b>{x.titre ? ' · ' + x.titre : ''} · {[x.P > 0 && eur(x.P), x.M > 0 && eur(x.M) + '/mois'].filter(Boolean).join(' + ')} · signé le {jourCourt(x.quand)}</span>
-                {h && <a href={h} className="rounded-lg bg-white px-3 py-1.5 font-semibold ring-1 ring-emerald-200">Voir le devis signé</a>}
-              </div>); })}
-            <p className="text-xs text-gray-500">Le suivi des versions et de l'acceptation de chaque devis est en place (empreinte et signature). La version détaillée arrive en phase 2.</p>
+        {rubrique('entreprise', '1', 'Entreprise et coordonnées', [cl.responsable, fmtTel(cl.telephone), cl.email].filter(Boolean).join(' · '), <>
+          <ChampsRubrique st={st} set={set} rub="entreprise" extra={<label className="block text-sm"><span className="text-[11px] font-bold uppercase tracking-wider text-gray-500">Secteur d'activité</span><input value={cl.secteur || ''} onChange={ev => set(p => ({ client: { ...p.client, secteur: ev.target.value } }))} className="mt-1 w-full rounded-lg border border-gray-200 px-3 py-2" /></label>} />
+          <p className="mt-4 text-sm font-semibold">Autres contacts</p>
+          <ul className="mt-1 text-sm">{contacts.map((x, i) => <li key={i} className="flex items-center gap-2 py-1"><span>{x.nom} <span className="text-gray-500">{[x.role, fmtTel(x.tel)].filter(Boolean).map(v => '· ' + v).join(' ')}</span></span>
+            <button onClick={() => set(p => ({ suivi: { ...p.suivi, contacts: contacts.filter((_, j) => j !== i) } }))} className="ml-auto text-xs text-gray-400 hover:text-red-600">Retirer</button></li>)}</ul>
+          <div className="mt-2 flex flex-wrap gap-2">
+            <input value={contact.nom} onChange={ev => setContact({ ...contact, nom: ev.target.value })} placeholder="Nom" className="min-w-[120px] flex-1 rounded-lg border border-gray-200 px-3 py-1.5 text-sm" />
+            <input value={contact.role} onChange={ev => setContact({ ...contact, role: ev.target.value })} placeholder="Rôle (associé, comptable…)" className="min-w-[120px] flex-1 rounded-lg border border-gray-200 px-3 py-1.5 text-sm" />
+            <input value={contact.tel} onChange={ev => setContact({ ...contact, tel: ev.target.value })} placeholder="Téléphone" inputMode="tel" className="w-36 rounded-lg border border-gray-200 px-3 py-1.5 text-sm" />
+            <button onClick={ajouterContact} className="rounded-lg bg-gray-100 px-3 py-1.5 text-sm font-semibold">+ Ajouter</button>
           </div>
         </>)}
-        {section('commandes', '3', 'Commandes et production', <div className="space-y-2 text-sm">
-          {cmds.map(c => { const fait = c.taches.filter(t => t.fait).length; return <a key={c.id} href={'#/commande/' + c.id} className="flex flex-wrap items-center justify-between gap-2 rounded-xl bg-gray-50 px-3 py-2.5 hover:bg-gray-100">
-            <span><b>{c.numero}</b> · {c.titre} · {fait}/{c.taches.length} tâches · livraison {jourCourt(c.livraisonPrevue)}</span><span className="rounded-full px-2.5 py-0.5 text-[11px] font-bold text-white" style={{ background: STATUTS_COMMANDE[c.statut][1] }}>{STATUTS_COMMANDE[c.statut][0]}</span></a>; })}
-          {sansCommande.map(x => <button key={x.numero} onClick={() => nouvelleCommande(x.numero)} className="w-full rounded-xl border border-dashed border-gray-300 px-3 py-2.5 text-left font-medium hover:bg-gray-50">+ Créer la commande du devis signé {x.numero}</button>)}
-          {!cmds.length && !sansCommande.length && <p className="text-gray-500">Aucune commande. Elle se crée quand un devis est signé.</p>}
-        </div>, cmds.length ? cmds.length + '' : '')}
-        {section('factures', '4', 'Factures et paiements', <div className="space-y-2 text-sm">
-          <div className="grid grid-cols-3 gap-2">{[['Facturé', solde.facture], ['Encaissé', solde.encaisse], ['Solde dû', solde.solde]].map(([l, v]) => <div key={l} className="rounded-xl bg-gray-50 px-3 py-2"><p className="text-[11px] font-bold uppercase tracking-wider text-gray-500">{l}</p><p className="tabular font-semibold">{eurC(v)}</p></div>)}</div>
+        {rubrique('catalogue', '2', 'Catalogue produits et grilles tarifaires', `${col.produits.length} produit(s)${col.documents.filter(d => d.categorie === 'tarifs').length ? ' · ' + col.documents.filter(d => d.categorie === 'tarifs').length + ' grille(s)' : ''}`, <CatalogueProduits st={st} set={set} toast={toast} />)}
+        {rubrique('documents', '3', 'Photos, vidéos et documents', `${col.documents.length} fichier(s)`, <DocumentsRubrique st={st} set={set} id={id} toast={toast} />)}
+        {rubrique('site', '4', 'Site internet et informations techniques', (col.rubriques.site || {}).domaine || '', <ChampsRubrique st={st} set={set} rub="site" extra={cmds.filter(c => c.site).map(c => <a key={c.id} href={'#/commande/' + c.id} className="block rounded-lg bg-gray-50 px-3 py-2 text-sm sm:col-span-2">Suivi technique de la commande {c.numero} : {[c.site.url, c.site.domaine, c.site.hebergement, c.site.miseEnLigne && 'en ligne le ' + jourCourt(c.site.miseEnLigne), c.site.renouvellement && 'renouvellement ' + jourCourt(c.site.renouvellement)].filter(Boolean).join(' · ') || 'à compléter'} →</a>)} />)}
+        {rubrique('acces', '5', 'Réseaux sociaux et accès', `${col.acces.length} compte(s) · ${col.acces.filter(a => a.etat === 'confirme').length} accès confirmé(s)`, <AccesRubrique st={st} set={set} />)}
+        {rubrique('planning', '6', 'Planning de production', `${taches.filter(t => !t.fait).length} tâche(s) à faire${su.rdv && su.rdv.date ? ' · RDV ' + jourCourt(su.rdv.date) : ''}`, <>
+          <ChampsRubrique st={st} set={set} rub="planning" />
+          {taches.length > 0 && <><p className="mt-4 text-sm font-semibold">Tâches de production</p><ul className="mt-1 space-y-1 text-sm">{taches.map(t => <li key={t.id}><a href={'#/commande/' + t.cmd.id} className={'flex justify-between gap-2 ' + (t.fait ? 'text-gray-400 line-through' : '')}><span>{t.fait ? '✓' : '○'} {t.texte}</span><span className="text-xs text-gray-500">{t.echeance ? jourCourt(t.echeance) : ''} · {t.cmd.numero}</span></a></li>)}</ul></>}
+          {cmds.map(c => <p key={c.id} className="mt-2 text-xs text-gray-500">Commande {c.numero} : livraison prévue le {jourCourt(c.livraisonPrevue)}{c.validationClient ? ' · validée par le client le ' + jourCourt(c.validationClient) : ''}</p>)}
+        </>)}
+        {rubrique('commercial', '7', 'Devis, contrats et commandes', `${signesL.length} contrat(s) · ${cmds.length} commande(s)`, <>
+          <BandeauDossier s={st} set={set} toast={toast} numero={numero} />
+          <div className="mt-3 space-y-2 text-sm">
+            <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl bg-gray-50 px-3 py-2.5">
+              <span><b>Devis en cours N° {numero}</b> · {e.chiffre && (e.montantP || e.montantM) ? [e.montantP > 0 && eur(e.montantP), e.montantM > 0 && eur(e.montantM) + '/mois'].filter(Boolean).join(' + ') : 'pas encore chiffré'}<span className="text-gray-500"> · {sig ? 'signé' : env ? `lien envoyé le ${jourCourt(env.date)}` : 'non envoyé'}</span></span>
+              <a href={prop} className="rounded-lg bg-ink px-3 py-1.5 font-semibold text-white">Ouvrir la proposition</a>
+            </div>
+            {signesL.map(x => { const h = lienSigne((st.signes || {})[x.numero]); return <div key={x.numero} className="flex flex-wrap items-center justify-between gap-2 rounded-xl bg-emerald-50 px-3 py-2.5 text-emerald-900">
+              <span>✓ <b>{x.numero}</b>{x.titre ? ' · ' + x.titre : ''} · {[x.P > 0 && eur(x.P), x.M > 0 && eur(x.M) + '/mois'].filter(Boolean).join(' + ')} · signé le {jourCourt(x.quand)}</span>
+              {h && <a href={h} className="rounded-lg bg-white px-3 py-1.5 font-semibold ring-1 ring-emerald-200">Voir le devis signé</a>}</div>; })}
+            {cmds.map(c => { const fait = c.taches.filter(t => t.fait).length; return <a key={c.id} href={'#/commande/' + c.id} className="flex flex-wrap items-center justify-between gap-2 rounded-xl bg-gray-50 px-3 py-2.5 hover:bg-gray-100">
+              <span><b>{c.numero}</b> · {c.titre} · {fait}/{c.taches.length} tâches · livraison {jourCourt(c.livraisonPrevue)}</span><span className="rounded-full px-2.5 py-0.5 text-[11px] font-bold text-white" style={{ background: STATUTS_COMMANDE[c.statut][1] }}>{STATUTS_COMMANDE[c.statut][0]}</span></a>; })}
+            {sansCommande.map(x => <button key={x.numero} onClick={() => nouvelleCommande(x.numero)} className="w-full rounded-xl border border-dashed border-gray-300 px-3 py-2.5 text-left font-medium hover:bg-gray-50">+ Créer la commande du devis signé {x.numero}</button>)}
+          </div>
+        </>)}
+        {rubrique('facturation', '8', 'Facturation, paiements et abonnements', `Facturé ${eurC(solde.facture)} · encaissé ${eurC(solde.encaisse)}${solde.solde ? ' · dû ' + eurC(solde.solde) : ''}${abos.length ? ' · ' + abos.filter(a => a.statut === 'actif').length + ' abonnement(s)' : ''}`, <div className="space-y-2 text-sm">
+          <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">{[['CA signé', caSigne ? eur(caSigne) : '—'], ['Facturé', eurC(solde.facture)], ['Encaissé', eurC(solde.encaisse)], ['Solde dû', eurC(solde.solde) + (solde.retard ? ' ⚠' : '')]].map(([l, v]) => <div key={l} className="rounded-xl bg-gray-50 px-3 py-2"><p className="text-[11px] font-bold uppercase tracking-wider text-gray-500">{l}</p><p className="tabular font-semibold">{v}</p></div>)}</div>
           {facts.map(x => <a key={x.id} href={'#/facture/' + x.id} className="flex flex-wrap items-center justify-between gap-2 rounded-xl px-3 py-2 hover:bg-gray-50"><span><b>{x.numero || 'Brouillon'}</b> · {x.objet}</span><span className="flex items-center gap-2"><span className="tabular">{x.type === 'avoir' ? '−' : ''}{eurC(x.totalTTC)}</span><Badge k={etatFacture(x, fin).statut} /></span></a>)}
           {solde.solde > 0 && (paie ? <div className="rounded-xl bg-gray-50 p-3"><FormPaiement f={fin} maj={majFin} dossierId={id} onFini={() => { setPaie(false); toast('Paiement enregistré.'); }} /></div>
             : <button onClick={() => setPaie(true)} className="rounded-xl bg-emerald-600 px-4 py-2 font-semibold text-white">+ Enregistrer un paiement</button>)}
-          {!facts.length && <p className="text-gray-500">Aucune facture. Elles se créent depuis une commande : acompte, solde ou mensualité.</p>}
-        </div>, facts.length ? facts.length + '' : '')}
-        {section('histo', '5', 'Historique et documents', <>
-          <ul className="max-h-80 space-y-1.5 overflow-y-auto text-[13px]">
-            {[...(su.historique || [])].reverse().map((h, i) => <li key={i} className="flex gap-2"><span className="w-20 shrink-0 text-gray-400">{jourCourt(h.date)}</span><span className={h.type === 'auto' ? 'text-gray-500' : ''}>{TYPES_ECHANGE[h.type] || ''} {h.texte}</span></li>)}
-          </ul>
-        </>)}
+          {abos.map(a => <a key={a.id} href="#/abonnements" className="flex items-center justify-between rounded-xl bg-sky-50 px-3 py-2 text-sky-900"><span>↻ Abonnement · {a.services.map(s => s.nom).join(', ')}</span><span className="font-semibold">{eurC(a.montantM)}/mois · {STATUTS_ABO[a.statut][0]}</span></a>)}
+          {!facts.length && !abos.length && <p className="text-gray-500">Aucune facture ni abonnement. Ils se créent depuis une commande{mrr ? ` (mensuel prévu au devis : ${eur(mrr)}/mois)` : ''}.</p>}
+        </div>)}
+        {rubrique('historique', '·', 'Historique et modifications', `${histoTout.length} entrée(s) · origine et date de chaque changement`, <ul className="max-h-96 space-y-1.5 overflow-y-auto text-[13px]">
+          {histoTout.map((h, i) => <li key={i} className="flex gap-2"><span className="w-20 shrink-0 text-gray-400">{jourCourt(h.date)}</span><span className={h.auto ? 'text-gray-500' : ''}>{h.txt}</span></li>)}</ul>)}
       </div>
       <Toast msg={msg} />
     </Shell>
@@ -3083,6 +3103,9 @@ function alertes() {
     if (a.prochaineEcheance && a.prochaineEcheance <= auj) out.push({ niv: 2, txt: `Mensualité à facturer : ${nomDossier(a.dossierId)}`, sous: `${eurC(a.montantM)} · échéance du ${jourCourt(a.prochaineEcheance)}`, h: '#/abonnements' });
     const r = renouvellementDe(a); if (r && r <= dans(30)) out.push({ niv: 1, txt: `Fin d'engagement : ${nomDossier(a.dossierId)}`, sous: `le ${jourCourt(r)} · proposer le renouvellement`, h: '#/abonnements' });
   });
+  idx.dossiers.filter(d => !d.archive).forEach(d => { const st = lireJSON(DK(d.id)); const c = st && st.collecte; if (!c) return;
+    if (c.nonLu > 0) out.push({ niv: 2, txt: `Nouvelles données reçues : ${d.entreprise}`, sous: `${c.nonLu} information(s) du portail client`, h: '#/c/' + d.id });
+    if ((c.aValider || []).length) out.push({ niv: 2, txt: `À valider : ${d.entreprise}`, sous: `${c.aValider.length} valeur(s) proposée(s) par le client`, h: '#/c/' + d.id }); });
   return out.sort((a, b) => b.niv - a.niv);
 }
 const NIVEAUX = { 3: ['Critique', 'bg-red-100 text-red-800', '⛔'], 2: ['Important', 'bg-amber-100 text-amber-900', '⚠'], 1: ['À suivre', 'bg-sky-100 text-sky-900', 'ℹ'] };
@@ -3351,6 +3374,543 @@ function PageStats() {
 function PageMenu() {
   return <Shell page="menu"><div className="mx-auto max-w-md space-y-2 px-4 pb-28 pt-6"><h1 className="mb-3 font-display text-2xl font-bold">Menu</h1>
     {NAV.map(([h, l, i]) => <a key={h} href={h} className="flex items-center gap-3 rounded-2xl bg-white px-4 py-3.5 text-[15px] font-semibold ring-1 ring-black/5"><span className="w-6 text-center">{i}</span>{l}</a>)}</div></Shell>;
+}
+
+/* ============================ Collecte client : portail, synchronisation, fiche en 8 rubriques ============================ */
+const RUBRIQUES_COLLECTE = {
+  entreprise: { titre: 'Entreprise et coordonnées', champs: [['nomCommercial', 'Nom commercial'], ['raisonSociale', 'Raison sociale'], ['siret', 'SIRET'], ['gerant', 'Nom du gérant'], ['telephone', 'Téléphone'], ['email', 'Email'], ['adresse', 'Adresse'], ['horaires', 'Horaires d\'ouverture', 'textarea'], ['activite', 'Votre activité en quelques mots', 'textarea']] },
+  site: { titre: 'Site internet', champs: [['domaine', 'Nom de domaine (existant ou souhaité)'], ['siteActuel', 'Site actuel (lien)'], ['hebergeur', 'Hébergeur actuel'], ['pages', 'Pages souhaitées', 'textarea'], ['couleurs', 'Couleurs, ambiance'], ['exemples', 'Sites que vous aimez (liens)', 'textarea']] },
+  planning: { titre: 'Planning de production', champs: [['dispos', 'Vos disponibilités pour le tournage', 'textarea'], ['datesCles', 'Dates importantes (ouverture, fêtes, promotions)', 'textarea'], ['delai', 'Délai souhaité pour la mise en ligne']] },
+};
+const MAP_CLIENT = { nomCommercial: 'entreprise', gerant: 'responsable', telephone: 'telephone', email: 'email', adresse: 'adresse' };
+const CATS_DOCS = [['logo', 'Logo'], ['boutique', 'Photos de la boutique'], ['produits', 'Photos des produits'], ['equipe', 'Photos de l\'équipe'], ['videos', 'Vidéos'], ['tarifs', 'Grilles tarifaires, menus'], ['documents', 'Autres documents']];
+const PLATEFORMES = ['Instagram', 'Facebook', 'TikTok', 'Fiche Google (Business Profile)', 'Nom de domaine', 'Hébergement', 'Autre'];
+const ETATS_ACCES = { creer: ['À créer', 'bg-gray-100 text-gray-700'], demander: ['À demander', 'bg-amber-100 text-amber-800'], invitation: ['Invitation envoyée', 'bg-sky-100 text-sky-800'], confirme: ['Accès confirmé', 'bg-emerald-100 text-emerald-800'] };
+const DISPOS = ['Disponible', 'Rupture', 'Bientôt'];
+const normCle = (s) => String(s || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^a-z0-9]+/g, ' ').trim();
+const prixEnCts = (v) => { if (v === null || v === undefined || v === '') return null; const n = parseFloat(String(v).replace(/[^\d,.-]/g, '').replace(',', '.')); return isNaN(n) ? null : Math.round(n * 100); };
+const chargerScript = (src) => new Promise((ok, ko) => { if (document.querySelector(`script[src="${src}"]`)) return ok(); const s = document.createElement('script'); s.src = src; s.onload = ok; s.onerror = () => ko(new Error('chargement impossible')); document.head.appendChild(s); });
+// CSV : encodage UTF-8, sinon Windows-1252 (export Excel français) ; séparateur ; , ou tabulation
+const decoderTexte = async (f) => { const b = await f.arrayBuffer(); try { return new TextDecoder('utf-8', { fatal: true }).decode(b).replace(/^\uFEFF/, ''); } catch { return new TextDecoder('windows-1252').decode(b); } };
+const lireCSV = (txt) => { const l0 = txt.split('\n')[0]; const sep = [';', '\t', ','].sort((a, b) => l0.split(b).length - l0.split(a).length)[0];
+  return txt.replace(/\r/g, '').split('\n').map(l => { const out = []; let cur = '', q = false; for (const ch of l) { if (ch === '"') q = !q; else if (ch === sep && !q) { out.push(cur); cur = ''; } else cur += ch; } out.push(cur); return out.map(s => s.trim()); }); };
+const lireFichier = (f) => new Promise((ok, ko) => { const r = new FileReader(); r.onload = () => ok(r.result); r.onerror = ko; r.readAsDataURL(f); });
+
+// ---------- configuration et transport ----------
+const confPortail = () => ({ url: '', cle: '', ...(((lireJSON(IDX) || {}).portail) || {}) });
+const LOCAL_SRV = 'crm-portail-local'; // mode démonstration : le « serveur » est ce navigateur
+function serveurLocal(p) {
+  const s = { clients: {}, reponses: [], fichiers: [], ...(lireJSON(LOCAL_SRV) || {}) }, now = new Date().toISOString();
+  const ok = (o) => { ecrireJSON(LOCAL_SRV, s); return { ok: true, ...o }; };
+  if (p.action === 'ping') return { ok: true, admin: true, local: true };
+  if (p.action === 'register') { s.clients[p.token] = p.client; return ok({}); }
+  if (!['pull'].includes(p.action) && !s.clients[p.token]) return { ok: false, erreur: 'lien de portail invalide' };
+  if (p.action === 'submit') { s.reponses.push({ date: now, token: p.token, data: p.data }); return ok({ date: now }); }
+  if (p.action === 'upload') { const id = 'loc-' + nouvelId(); s.fichiers.push({ date: now, token: p.token, categorie: p.categorie, nom: p.nom, id, url: `data:${p.mime};base64,${p.base64}`, mime: p.mime, taille: Math.round((p.base64 || '').length * 0.75), source: p.key ? 'crm' : 'portail', note: p.note || '' }); try { return ok({ id, url: s.fichiers[s.fichiers.length - 1].url, date: now }); } catch { s.fichiers.pop(); return { ok: false, erreur: 'mémoire de démonstration pleine' }; } }
+  if (p.action === 'pull') { const t = new Set(String(p.tokens).split(',')); const d = p.depuis || '';
+    return { ok: true, reponses: s.reponses.filter(r => t.has(r.token) && r.date > d), fichiers: s.fichiers.filter(f => t.has(f.token)), maintenant: now }; }
+  return { ok: false, erreur: 'action inconnue' };
+}
+async function appelPortail(url, payload, get) {
+  if (!url) return serveurLocal(payload);
+  try {
+    const r = get ? await fetch(url + '?' + new URLSearchParams(payload).toString())
+      : await fetch(url, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify(payload) });
+    return await r.json();
+  } catch (e) { return { ok: false, erreur: 'connexion impossible (' + e.message + ')' }; }
+}
+async function envoyerFichier(url, token, client, fichier, categorie, note, key) {
+  if (fichier.size > 25 * 1024 * 1024) return { ok: false, erreur: `${fichier.name} dépasse 25 Mo : envoyez un lien (WeTransfer, Drive…)` };
+  const image = /^image\/(jpe?g|png|webp|heic)/i.test(fichier.type);
+  let dataUrl = image ? await compress(fichier, 1800, 0.85).catch(() => null) : null;
+  if (!dataUrl) dataUrl = await lireFichier(fichier);
+  const mime = dataUrl.slice(5, dataUrl.indexOf(';')), base64 = dataUrl.split(',')[1];
+  const nom = image && mime === 'image/jpeg' && !/\.jpe?g$/i.test(fichier.name) ? fichier.name.replace(/\.[^.]+$/, '') + '.jpg' : fichier.name;
+  const r = await appelPortail(url, { action: 'upload', token, client, categorie, nom, mime, base64, note: note || '', ...(key ? { key } : {}) });
+  return r.ok ? { ...r, nom, mime, categorie } : r;
+}
+const lienPortail = (st) => { const c = st.collecte || {}, conf = confPortail(), v = vendeurInfo((lireJSON(IDX) || {}).vendeur || st.vendeur || {});
+  return `${location.origin}${location.pathname}#portail=${LZString.compressToEncodedURIComponent(JSON.stringify({ u: conf.url, t: c.token, n: (st.client || {}).entreprise || '', v: v.nom, tel: v.tel }))}`; };
+async function assurerJeton(id) {
+  const st = lireJSON(DK(id)); const c = st.collecte || {};
+  const conf = confPortail();
+  const token = c.token || (nouvelId() + nouvelId() + nouvelId()).slice(0, 24);
+  const r = await appelPortail(conf.url, { action: 'register', token, client: (st.client || {}).entreprise || 'Client', key: conf.cle });
+  if (!r.ok) return { ok: false, erreur: r.erreur };
+  if (!c.token) { st.collecte = { ...c, token, lienCree: new Date().toISOString() }; sauverDossier(id, st); }
+  return { ok: true, token };
+}
+
+// ---------- modèle et fusion (rien n'est écrasé sans vérification) ----------
+const collecteDe = (st) => ({ rubriques: {}, produits: [], documents: [], acces: [], journal: [], origines: {}, aValider: [], nouveau: {}, ...(st.collecte || {}) });
+const lireChamp = (st, rub, k) => (rub === 'entreprise' && MAP_CLIENT[k] ? (st.client || {})[MAP_CLIENT[k]] : ((collecteDe(st).rubriques[rub] || {})[k])) || '';
+function ecrireChamp(st, rub, k, v) {
+  if (rub === 'entreprise' && MAP_CLIENT[k]) return { ...st, client: { ...st.client, [MAP_CLIENT[k]]: v } };
+  const c = collecteDe(st); return { ...st, collecte: { ...c, rubriques: { ...c.rubriques, [rub]: { ...(c.rubriques[rub] || {}), [k]: v } } } };
+}
+const libelleChamp = (rub, k) => ((RUBRIQUES_COLLECTE[rub] || { champs: [] }).champs.find(x => x[0] === k) || [k, k])[1];
+// journal : une saisie continue dans le CRM ne crée qu'une ligne
+function journaliser(c, e) {
+  const j = [...(c.journal || [])], der = j[j.length - 1];
+  if (der && e.origine === 'crm' && der.origine === 'crm' && der.cle === e.cle && Date.now() - new Date(der.date) < 120000) j[j.length - 1] = { ...der, apres: e.apres, date: new Date().toISOString() };
+  else j.push({ date: new Date().toISOString(), ...e });
+  return j.slice(-400);
+}
+// modification depuis le CRM (garde l'origine et l'historique)
+function modifierDepuisCrm(st, rub, k, v) {
+  const avant = lireChamp(st, rub, k); let n = ecrireChamp(st, rub, k, v); const c = collecteDe(n), cle = rub + '.' + k;
+  return { ...n, collecte: { ...c, origines: { ...c.origines, [cle]: { origine: 'crm', date: new Date().toISOString(), valeur: v } }, journal: journaliser(c, { origine: 'crm', rubrique: rub, cle, champ: libelleChamp(rub, k), avant, apres: v }) } };
+}
+function fusionnerCollecte(st0, reponses, fichiers) {
+  let st = { ...st0, collecte: collecteDe(st0) };
+  const nouv = [], marque = (rub) => { st.collecte.nouveau = { ...st.collecte.nouveau, [rub]: true }; };
+  const log = (e) => { st.collecte.journal = journaliser(st.collecte, { origine: 'client', ...e }); };
+  const enAttente = (x) => st.collecte.aValider.some(a => a.cle === x.cle && a.proposee === x.proposee);
+  [...reponses].sort((a, b) => a.date.localeCompare(b.date)).forEach(rep => {
+    if (rep.date <= (st.collecte.dernierImport || '')) return;
+    const d = rep.data || {};
+    Object.entries(d.rubriques || {}).forEach(([rub, champs]) => Object.entries(champs || {}).forEach(([k, v]) => {
+      v = String(v || '').trim(); if (!v || !RUBRIQUES_COLLECTE[rub]) return;
+      const cur = String(lireChamp(st, rub, k) || '').trim(), cle = rub + '.' + k, orig = st.collecte.origines[cle];
+      if (cur === v) return;
+      if (!cur || (orig && orig.origine === 'client' && String(orig.valeur) === cur)) {
+        st = ecrireChamp(st, rub, k, v); st.collecte = { ...collecteDe(st), origines: { ...collecteDe(st).origines, [cle]: { origine: 'client', date: rep.date, valeur: v } } };
+        log({ rubrique: rub, cle, champ: libelleChamp(rub, k), avant: cur, apres: v }); nouv.push(cle); marque(rub);
+      } else if (!enAttente({ cle, proposee: v })) { st.collecte.aValider = [...st.collecte.aValider, { type: 'champ', cle, rubrique: rub, champ: k, libelle: libelleChamp(rub, k), actuelle: cur, proposee: v, date: rep.date }]; nouv.push(cle); marque(rub); }
+    }));
+    (d.produits || []).forEach(p => {
+      if (!String(p.nom || '').trim()) return;
+      const k = normCle(p.categorie) + '|' + normCle(p.nom), ex = st.collecte.produits.find(x => normCle(x.categorie) + '|' + normCle(x.nom) === k), prix = prixEnCts(p.prix);
+      if (!ex) { st.collecte.produits = [...st.collecte.produits, { id: nouvelId(), categorie: p.categorie || '', nom: p.nom.trim(), description: p.description || '', prix, photo: p.photo || '', disponibilite: p.disponibilite || 'Disponible', saison: p.saison || 'permanent', vente: p.vente || 'boutique', source: 'portail', recuLe: rep.date }];
+        log({ rubrique: 'catalogue', cle: 'produit.' + k, champ: 'Produit ajouté', avant: '', apres: p.nom + (prix !== null ? ' · ' + eurC(prix) : '') }); nouv.push(k); marque('catalogue'); }
+      else if (prix !== null && prix !== ex.prix) {
+        if (ex.source === 'portail' && !ex.modifieCrm) { st.collecte.produits = st.collecte.produits.map(x => x === ex ? { ...x, prix } : x); log({ rubrique: 'catalogue', cle: 'produit.' + k, champ: 'Prix de ' + ex.nom, avant: ex.prix === null ? '' : eurC(ex.prix), apres: eurC(prix) }); marque('catalogue'); }
+        else if (!enAttente({ cle: 'produit.' + k, proposee: eurC(prix) })) st.collecte.aValider = [...st.collecte.aValider, { type: 'produit', cle: 'produit.' + k, produitId: ex.id, libelle: 'Prix de « ' + ex.nom + ' »', actuelle: ex.prix === null ? '' : eurC(ex.prix), proposee: eurC(prix), prix, date: rep.date }];
+        nouv.push(k);
+      }
+    });
+    (d.acces || []).forEach(a => {
+      if (!a.plateforme) return;
+      const k = normCle(a.plateforme) + '|' + normCle(a.lien), ex = st.collecte.acces.find(x => normCle(x.plateforme) + '|' + normCle(x.lien) === k);
+      if (!ex) { st.collecte.acces = [...st.collecte.acces, { id: nouvelId(), plateforme: a.plateforme, lien: a.lien || '', emailAdmin: a.emailAdmin || '', proprietaire: a.proprietaire || 'Le client', etat: a.invitation ? 'invitation' : (a.lien ? 'demander' : 'creer'), verifieLe: '', source: 'portail' }];
+        log({ rubrique: 'acces', cle: 'acces.' + k, champ: 'Compte ' + a.plateforme, avant: '', apres: a.lien || 'à créer' }); nouv.push(k); marque('acces'); }
+      else if (a.invitation && ['creer', 'demander'].includes(ex.etat)) { st.collecte.acces = st.collecte.acces.map(x => x === ex ? { ...x, etat: 'invitation' } : x); log({ rubrique: 'acces', cle: 'acces.' + k, champ: 'Accès ' + a.plateforme, avant: ETATS_ACCES[ex.etat][0], apres: 'Invitation envoyée' }); marque('acces'); nouv.push(k); }
+    });
+    if (d.termine && !st.collecte.termineLe) { st.collecte.termineLe = rep.date; log({ rubrique: 'portail', cle: 'termine', champ: 'Formulaire', avant: '', apres: 'validé par le client' }); nouv.push('termine'); }
+    st.collecte.derniereReponse = rep.date; st.collecte.dernierImport = rep.date;
+  });
+  (fichiers || []).forEach(f => {
+    if (st.collecte.documents.some(x => x.id === f.id)) return;
+    st.collecte.documents = [...st.collecte.documents, { id: f.id, nom: f.nom, categorie: f.categorie || 'documents', url: f.url, mime: f.mime, taille: f.taille, recuLe: f.date, source: f.source || 'portail', note: f.note || '' }];
+    if (f.categorie === 'produits' && f.note) st.collecte.produits = st.collecte.produits.map(p => normCle(p.nom) === normCle(f.note) && !p.photo ? { ...p, photo: f.url } : p);
+    if ((f.source || 'portail') === 'portail') { log({ rubrique: 'documents', cle: 'doc.' + f.id, champ: 'Fichier reçu (' + ((CATS_DOCS.find(c => c[0] === f.categorie) || [0, f.categorie])[1]) + ')', avant: '', apres: f.nom }); nouv.push(f.id); marque(f.categorie === 'tarifs' ? 'catalogue' : 'documents'); }
+    if (!st.collecte.derniereReponse || f.date > st.collecte.derniereReponse) st.collecte.derniereReponse = f.date;
+  });
+  st.collecte.nonLu = (st.collecte.nonLu || 0) + nouv.length;
+  if (nouv.length) { const su = st.suivi || {}; st.suivi = { ...su, historique: [...(su.historique || []), { date: new Date().toISOString(), type: 'auto', texte: `Portail client : ${nouv.length} nouvelle(s) information(s) reçue(s)` }] }; }
+  return { st, n: nouv.length };
+}
+// récupère les réponses du portail pour un ou plusieurs dossiers
+async function synchroniserPortail(ids) {
+  const conf = confPortail(), idx = lireJSON(IDX) || { dossiers: [] };
+  const cibles = (ids || idx.dossiers.map(d => d.id)).map(id => ({ id, st: lireJSON(DK(id)) })).filter(x => x.st && x.st.collecte && x.st.collecte.token);
+  if (!cibles.length) return { ok: true, n: 0 };
+  if (conf.url && !conf.cle) return { ok: false, erreur: 'clé d\'administration manquante (Réglages)' };
+  const r = await appelPortail(conf.url, { action: 'pull', key: conf.cle, tokens: cibles.map(x => x.st.collecte.token).join(',') }, true);
+  if (!r.ok) return r;
+  let total = 0;
+  cibles.forEach(({ id, st }) => {
+    const t = st.collecte.token;
+    const { st: n, n: k } = fusionnerCollecte(st, r.reponses.filter(x => x.token === t), r.fichiers.filter(x => x.token === t));
+    if (k) { sauverDossier(id, n); total += k; }
+  });
+  const i2 = lireJSON(IDX); if (i2) { i2.portailSync = new Date().toISOString(); ecrireJSON(IDX, i2); }
+  return { ok: true, n: total };
+}
+
+// progression de la collecte et éléments manquants
+function etatCollecte(st) {
+  const c = collecteDe(st), cl = st.client || {}, docs = c.documents, r = c.rubriques;
+  const items = [
+    ['Coordonnées complètes', !!(cl.entreprise && cl.telephone && cl.email && cl.adresse), 'entreprise'],
+    ['Horaires d\'ouverture', !!(r.entreprise || {}).horaires, 'entreprise'],
+    ['Catalogue produits ou grille tarifaire', c.produits.length > 0 || docs.some(d => d.categorie === 'tarifs'), 'catalogue'],
+    ['Logo', docs.some(d => d.categorie === 'logo'), 'documents'],
+    ['Photos (3 minimum)', docs.filter(d => ['boutique', 'produits', 'equipe'].includes(d.categorie)).length >= 3, 'documents'],
+    ['Informations du site (nom de domaine)', !!(r.site || {}).domaine, 'site'],
+    ['Réseaux sociaux et comptes', c.acces.length > 0, 'acces'],
+    ['Disponibilités pour le tournage', !!(r.planning || {}).dispos, 'planning'],
+  ];
+  const recus = items.filter(x => x[1]), manquants = items.filter(x => !x[1]);
+  return { items, recus, manquants, pct: Math.round(recus.length / items.length * 100), docsAttente: manquants.filter(x => x[2] === 'documents' || x[0].startsWith('Catalogue')).map(x => x[0]) };
+}
+
+// ---------- composants de la fiche ----------
+function ChampsRubrique({ st, set, rub, extra }) {
+  const def = RUBRIQUES_COLLECTE[rub], c = collecteDe(st);
+  return (
+    <div className="grid gap-3 sm:grid-cols-2">
+      {def.champs.map(([k, l, type]) => { const o = c.origines[rub + '.' + k];
+        return <label key={k} className={'block text-sm ' + (type === 'textarea' ? 'sm:col-span-2' : '')}>
+          <span className="flex items-center gap-2 text-[11px] font-bold uppercase tracking-wider text-gray-500">{l}{o && o.origine === 'client' && <span className="rounded-full bg-violet-100 px-1.5 py-0.5 text-[10px] normal-case tracking-normal text-violet-800">reçu du client le {jourCourt(o.date)}</span>}</span>
+          {type === 'textarea' ? <textarea rows={3} value={lireChamp(st, rub, k)} onChange={e => set(p => modifierDepuisCrm(p, rub, k, e.target.value))} className="mt-1 w-full rounded-lg border border-gray-200 px-3 py-2" />
+            : <input value={lireChamp(st, rub, k)} onChange={e => set(p => modifierDepuisCrm(p, rub, k, e.target.value))} className="mt-1 w-full rounded-lg border border-gray-200 px-3 py-2" />}
+        </label>; })}
+      {extra}
+    </div>
+  );
+}
+
+function CatalogueProduits({ st, set, toast }) {
+  const c = collecteDe(st), produits = c.produits;
+  const [revue, setRevue] = useState(null), [charge, setCharge] = useState(''), [filtre, setFiltre] = useState('');
+  const fic = useRef();
+  const majProduits = (fn, log) => set(p => { const cc = collecteDe(p); const np = fn(cc.produits); return { ...p, collecte: { ...cc, produits: np, ...(log ? { journal: journaliser(cc, { origine: 'crm', rubrique: 'catalogue', ...log }) } : {}) } }; });
+  const majP = (id, patch) => majProduits(l => l.map(x => x.id === id ? { ...x, ...patch, modifieCrm: true } : x), { cle: 'produit.' + id + '.' + Object.keys(patch)[0], champ: 'Produit modifié', avant: '', apres: (produits.find(x => x.id === id) || {}).nom });
+  const ajouter = () => majProduits(l => [...l, { id: nouvelId(), categorie: '', nom: '', description: '', prix: null, photo: '', disponibilite: 'Disponible', saison: 'permanent', vente: 'boutique', source: 'crm', modifieCrm: true }]);
+  // import : Excel / CSV (lecture du tableau), PDF (extraction assistée). Toujours une revue humaine avant l'import.
+  const importer = async (f) => {
+    setCharge('Lecture de ' + f.name + '…');
+    try {
+      let lignes = [];
+      if (/\.pdf$/i.test(f.name)) {
+        await chargerScript('https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js');
+        window.pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+        const pdf = await window.pdfjsLib.getDocument({ data: await f.arrayBuffer() }).promise;
+        let cat = '';
+        for (let i = 1; i <= pdf.numPages; i++) {
+          const items = (await (await pdf.getPage(i)).getTextContent()).items;
+          const parY = {}; items.forEach(it => { const y = Math.round(it.transform[5]); (parY[y] = parY[y] || []).push(it); });
+          Object.keys(parY).map(Number).sort((a, b) => b - a).forEach(y => {
+            const txt = parY[y].sort((a, b) => a.transform[4] - b.transform[4]).map(x => x.str).join(' ').replace(/\s+/g, ' ').trim(); if (!txt) return;
+            const m = txt.match(/^(.*?[A-Za-zÀ-ÿ].*?)[\s.…·:-]*(\d{1,4}(?:[.,]\d{1,2})?)\s*(?:€|eur|euros)?$/i);
+            if (m && m[1].trim().length > 1) lignes.push({ categorie: cat, nom: m[1].replace(/[.…·:-]+$/, '').trim(), prix: m[2], brut: txt, ok: true });
+            else if (txt.length < 40 && !/\d/.test(txt)) cat = txt;
+            else lignes.push({ categorie: cat, nom: txt, prix: '', brut: txt, ok: false });
+          });
+        }
+      } else {
+        let rows;
+        if (/\.(csv|txt)$/i.test(f.name)) rows = lireCSV(await decoderTexte(f)); // CSV : lu tel quel (accents, virgule décimale)
+        else {
+          await chargerScript('https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js');
+          const wb = window.XLSX.read(await f.arrayBuffer(), { type: 'array' });
+          rows = window.XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { header: 1, defval: '', raw: false });
+        }
+        rows = rows.filter(r => r.some(x => String(x).trim()));
+        const tete = (rows[0] || []).map(normCle), col = (re) => tete.findIndex(h => re.test(h));
+        let ci = { cat: col(/categ|famille|rayon|type/), nom: col(/nom|produit|article|designation|libelle/), desc: col(/descr|detail|compos/), prix: col(/prix|tarif|ttc|montant|eur/), dispo: col(/dispo|stock/), saison: col(/saison|perman/), vente: col(/commande|boutique|vente/) };
+        let corps = rows.slice(1);
+        if (ci.nom < 0) { ci = { cat: -1, nom: 0, desc: -1, prix: (rows[0] || []).findIndex((x, i) => i > 0 && prixEnCts(x) !== null), dispo: -1, saison: -1, vente: -1 }; corps = rows; }
+        lignes = corps.map(r => ({ categorie: ci.cat >= 0 ? String(r[ci.cat]).trim() : '', nom: String(r[ci.nom] || '').trim(), description: ci.desc >= 0 ? String(r[ci.desc]).trim() : '', prix: ci.prix >= 0 ? String(r[ci.prix]).trim() : '',
+          disponibilite: ci.dispo >= 0 && /rupt|non|0/i.test(String(r[ci.dispo])) ? 'Rupture' : 'Disponible', saison: ci.saison >= 0 && /saison/i.test(String(r[ci.saison])) ? 'saisonnier' : 'permanent', vente: ci.vente >= 0 && /command/i.test(String(r[ci.vente])) ? 'commande' : 'boutique', brut: r.join(' · '), ok: !!String(r[ci.nom] || '').trim() }));
+      }
+      setRevue({ fichier: f.name, pdf: /\.pdf$/i.test(f.name), lignes: lignes.filter(l => l.nom) });
+    } catch (e) { toast('Lecture impossible : ' + e.message); }
+    setCharge('');
+  };
+  const valider = () => {
+    const choisis = revue.lignes.filter(l => l.ok);
+    let ajout = 0, ignores = 0;
+    majProduits(liste => { const out = [...liste]; choisis.forEach(l => { const k = normCle(l.categorie) + '|' + normCle(l.nom);
+      if (out.some(x => normCle(x.categorie) + '|' + normCle(x.nom) === k)) { ignores++; return; }
+      out.push({ id: nouvelId(), categorie: l.categorie, nom: l.nom, description: l.description || '', prix: prixEnCts(l.prix), photo: '', disponibilite: l.disponibilite || 'Disponible', saison: l.saison || 'permanent', vente: l.vente || 'boutique', source: 'import ' + revue.fichier, modifieCrm: true }); ajout++; }); return out; },
+      { cle: 'import.' + revue.fichier, champ: 'Import de ' + revue.fichier, avant: '', apres: choisis.length + ' ligne(s) vérifiée(s)' });
+    setRevue(null); toast(`${ajout} produit(s) importé(s)${ignores ? `, ${ignores} doublon(s) ignoré(s)` : ''}.`);
+  };
+  const cats = [...new Set(produits.map(p => p.categorie).filter(Boolean))];
+  const visibles = produits.filter(p => !filtre || p.categorie === filtre);
+  const inp = 'w-full rounded border border-gray-200 px-2 py-1 text-[13px]';
+  return (
+    <div className="space-y-3">
+      <div className="flex flex-wrap items-center gap-2">
+        <button onClick={ajouter} className="rounded-lg bg-ink px-3 py-1.5 text-sm font-semibold text-white">+ Produit</button>
+        <button onClick={() => fic.current.click()} className="rounded-lg border border-gray-200 px-3 py-1.5 text-sm font-medium">Importer Excel, CSV ou PDF</button>
+        <input ref={fic} type="file" accept=".xlsx,.xls,.csv,.ods,.pdf" className="hidden" onChange={e => { e.target.files[0] && importer(e.target.files[0]); e.target.value = ''; }} />
+        {cats.length > 1 && <select value={filtre} onChange={e => setFiltre(e.target.value)} className="ml-auto rounded-lg border border-gray-200 px-2 py-1.5 text-sm"><option value="">Toutes les catégories</option>{cats.map(x => <option key={x}>{x}</option>)}</select>}
+        {charge && <span className="text-sm text-gray-500">{charge}</span>}
+      </div>
+      {revue && (
+        <div className="rounded-xl bg-amber-50 p-3 ring-1 ring-amber-200">
+          <p className="text-sm font-semibold text-amber-900">Vérification avant import · {revue.fichier}</p>
+          <p className="text-xs text-amber-900">{revue.pdf ? 'Extraction assistée depuis le PDF : vérifiez et corrigez chaque ligne. Les lignes sans prix lisible restent décochées, et aucun prix n\'est inventé.' : 'Vérifiez les lignes lues dans le tableau. Les prix absents restent vides.'} Rien n'est importé sans votre validation.</p>
+          <div className="mt-2 max-h-80 overflow-auto rounded-lg bg-white">
+            <table className="w-full text-[13px]"><thead><tr className="text-left text-[11px] uppercase text-gray-500"><th className="p-1.5" /><th className="p-1.5">Catégorie</th><th className="p-1.5">Produit</th><th className="p-1.5 text-right">Prix TTC</th>{revue.pdf && <th className="p-1.5">Texte lu</th>}</tr></thead>
+              <tbody>{revue.lignes.map((l, i) => { const maj = (patch) => setRevue(r => ({ ...r, lignes: r.lignes.map((x, j) => j === i ? { ...x, ...patch } : x) }));
+                return <tr key={i} className="border-t border-gray-100">
+                  <td className="p-1.5"><input type="checkbox" checked={l.ok} onChange={() => maj({ ok: !l.ok })} className="h-4 w-4" /></td>
+                  <td className="p-1.5"><input value={l.categorie} onChange={e => maj({ categorie: e.target.value })} className={inp} /></td>
+                  <td className="p-1.5"><input value={l.nom} onChange={e => maj({ nom: e.target.value })} className={inp} /></td>
+                  <td className="p-1.5"><input value={l.prix} onChange={e => maj({ prix: e.target.value })} className={inp + ' text-right ' + (prixEnCts(l.prix) === null ? 'border-red-300 bg-red-50' : '')} placeholder="manquant" /></td>
+                  {revue.pdf && <td className="p-1.5 text-xs text-gray-400">{l.brut}</td>}</tr>; })}</tbody></table>
+          </div>
+          <div className="mt-2 flex gap-2"><button onClick={valider} className="rounded-lg bg-amber-600 px-3 py-1.5 text-sm font-semibold text-white">Importer les {revue.lignes.filter(l => l.ok).length} ligne(s) cochée(s)</button><button onClick={() => setRevue(null)} className="rounded-lg px-3 py-1.5 text-sm text-gray-600">Annuler</button></div>
+        </div>
+      )}
+      {visibles.length ? <div className="overflow-x-auto"><table className="w-full min-w-[760px] text-[13px]">
+        <thead><tr className="text-left text-[11px] uppercase tracking-wide text-gray-500"><th className="p-1.5">Photo</th><th className="p-1.5">Catégorie</th><th className="p-1.5">Produit</th><th className="p-1.5">Description</th><th className="p-1.5 text-right">Prix TTC</th><th className="p-1.5">Dispo.</th><th className="p-1.5">Type</th><th className="p-1.5">Vente</th><th /></tr></thead>
+        <tbody>{visibles.map(p => <tr key={p.id} className="border-t border-gray-100 align-top">
+          <td className="p-1.5">{p.photo ? <a href={p.photo} target="_blank" rel="noopener" className="block h-9 w-9 overflow-hidden rounded bg-gray-100">{/^data:image|^https:\/\/.*(googleusercontent|thumbnail)/.test(p.photo) ? <img src={p.photo} alt="" className="h-full w-full object-cover" /> : <span className="grid h-full place-items-center text-xs">🖼</span>}</a> : <span className="text-xs text-gray-300">—</span>}</td>
+          <td className="p-1.5"><input value={p.categorie} onChange={e => majP(p.id, { categorie: e.target.value })} className={inp + ' w-28'} /></td>
+          <td className="p-1.5"><input value={p.nom} onChange={e => majP(p.id, { nom: e.target.value })} className={inp} />{p.source && p.source !== 'crm' && <span className="text-[10px] text-violet-700">{p.source === 'portail' ? 'reçu du client' : p.source}</span>}</td>
+          <td className="p-1.5"><input value={p.description} onChange={e => majP(p.id, { description: e.target.value })} className={inp} /></td>
+          <td className="p-1.5"><input value={p.prix === null || p.prix === undefined ? '' : (p.prix / 100).toFixed(2)} onChange={e => majP(p.id, { prix: prixEnCts(e.target.value) })} placeholder="à préciser" className={inp + ' w-20 text-right'} /></td>
+          <td className="p-1.5"><select value={p.disponibilite} onChange={e => majP(p.id, { disponibilite: e.target.value })} className={inp}>{DISPOS.map(x => <option key={x}>{x}</option>)}</select></td>
+          <td className="p-1.5"><select value={p.saison} onChange={e => majP(p.id, { saison: e.target.value })} className={inp}><option value="permanent">Permanent</option><option value="saisonnier">Saisonnier</option></select></td>
+          <td className="p-1.5"><select value={p.vente} onChange={e => majP(p.id, { vente: e.target.value })} className={inp}><option value="boutique">En boutique</option><option value="commande">Sur commande</option></select></td>
+          <td className="p-1.5"><button onClick={() => confirm(`Retirer « ${p.nom || 'ce produit'} » ?`) && majProduits(l => l.filter(x => x.id !== p.id), { cle: 'produit.' + p.id, champ: 'Produit retiré', avant: p.nom, apres: '' })} className="text-gray-300 hover:text-red-600">✕</button></td>
+        </tr>)}</tbody></table></div> : <p className="text-sm text-gray-500">Aucun produit. Ajoutez-les à la main, importez une grille (Excel, CSV, PDF), ou laissez le client les saisir dans le portail.</p>}
+      {c.documents.filter(d => d.categorie === 'tarifs').length > 0 && <p className="text-xs text-gray-500">Grilles reçues : {c.documents.filter(d => d.categorie === 'tarifs').map(d => <a key={d.id} href={d.url} target="_blank" rel="noopener" className="mr-2 underline">{d.nom}</a>)} (téléchargez-la puis « Importer » pour la vérifier ligne par ligne)</p>}
+    </div>
+  );
+}
+
+function DocumentsRubrique({ st, set, id, toast }) {
+  const c = collecteDe(st), [cat, setCat] = useState('boutique'), [lien, setLien] = useState(''), [envoi, setEnvoi] = useState('');
+  const fic = useRef();
+  const conf = confPortail();
+  const ajouterDocs = (docs, txt) => set(p => { const cc = collecteDe(p); return { ...p, collecte: { ...cc, documents: [...cc.documents, ...docs], journal: journaliser(cc, { origine: 'crm', rubrique: 'documents', cle: 'doc.' + nouvelId(), champ: txt, avant: '', apres: docs.map(d => d.nom).join(', ') }) } }; });
+  const televerser = async (files) => {
+    if (!c.token && !(await assurerJeton(id)).ok) return toast('Portail non configuré : ajoutez plutôt un lien.');
+    const tok = (lireJSON(DK(id)).collecte || {}).token, out = [];
+    for (const f of files) { setEnvoi('Envoi de ' + f.name + '…'); const r = await envoyerFichier(conf.url, tok, st.client.entreprise, f, cat, '', conf.cle);
+      if (r.ok) out.push({ id: r.id, nom: r.nom, categorie: cat, url: r.url, mime: r.mime, taille: f.size, recuLe: r.date, source: 'crm' }); else toast(r.erreur); }
+    setEnvoi(''); if (out.length) { ajouterDocs(out, 'Fichier ajouté'); toast(out.length + ' fichier(s) ajouté(s).'); }
+  };
+  const groupes = CATS_DOCS.map(([k, l]) => [k, l, c.documents.filter(d => d.categorie === k)]);
+  return (
+    <div className="space-y-3">
+      <div className="flex flex-wrap items-center gap-2">
+        <select value={cat} onChange={e => setCat(e.target.value)} className="rounded-lg border border-gray-200 px-2 py-1.5 text-sm">{CATS_DOCS.map(([k, l]) => <option key={k} value={k}>{l}</option>)}</select>
+        <button onClick={() => fic.current.click()} className="rounded-lg bg-ink px-3 py-1.5 text-sm font-semibold text-white">+ Fichiers</button>
+        <input ref={fic} type="file" multiple className="hidden" onChange={e => { televerser([...e.target.files]); e.target.value = ''; }} />
+        <input value={lien} onChange={e => setLien(e.target.value)} placeholder="ou un lien (WeTransfer, Drive…)" className="min-w-[180px] flex-1 rounded-lg border border-gray-200 px-3 py-1.5 text-sm" />
+        <button onClick={() => { if (!/^https?:\/\//.test(lien.trim())) return toast('Collez un lien qui commence par https://'); ajouterDocs([{ id: 'lien-' + nouvelId(), nom: lien.trim(), categorie: cat, url: lien.trim(), mime: 'lien', recuLe: new Date().toISOString(), source: 'crm' }], 'Lien ajouté'); setLien(''); }} className="rounded-lg bg-gray-100 px-3 py-1.5 text-sm font-semibold">Ajouter le lien</button>
+        {envoi && <span className="text-sm text-gray-500">{envoi}</span>}
+      </div>
+      {groupes.map(([k, l, docs]) => docs.length > 0 && <div key={k}>
+        <p className="text-[11px] font-bold uppercase tracking-wider text-gray-500">{l} <span className="font-normal">({docs.length})</span></p>
+        <div className="mt-1 grid grid-cols-2 gap-2 sm:grid-cols-4">{docs.map(d => <div key={d.id} className="overflow-hidden rounded-xl ring-1 ring-black/5">
+          <a href={d.url} target="_blank" rel="noopener" className="block aspect-[4/3] bg-gray-100">{/^data:image/.test(d.url) ? <img src={d.url} alt="" className="h-full w-full object-cover" /> : <span className="grid h-full place-items-center text-2xl">{/image/.test(d.mime) ? '🖼' : /video/.test(d.mime) ? '🎬' : d.mime === 'lien' ? '🔗' : /pdf/.test(d.mime) ? '📄' : '📎'}</span>}</a>
+          <div className="p-2 text-[11px]"><p className="truncate font-medium">{d.nom}</p><p className="text-gray-500">{jourCourt(d.recuLe)} · {d.source === 'portail' ? 'client' : 'CRM'}</p>
+            <select value={d.categorie} onChange={e => set(p => { const cc = collecteDe(p); return { ...p, collecte: { ...cc, documents: cc.documents.map(x => x.id === d.id ? { ...x, categorie: e.target.value } : x), journal: journaliser(cc, { origine: 'crm', rubrique: 'documents', cle: 'doc.' + d.id, champ: 'Reclassé : ' + d.nom, avant: d.categorie, apres: e.target.value }) } }; })} className="mt-1 w-full rounded border border-gray-200 text-[11px]">{CATS_DOCS.map(([k2, l2]) => <option key={k2} value={k2}>{l2}</option>)}</select></div>
+        </div>)}</div></div>)}
+      {!c.documents.length && <p className="text-sm text-gray-500">Aucun document. Le client peut les envoyer depuis le portail, ou vous pouvez les ajouter ici.</p>}
+      {conf.url && c.documents.some(d => d.source !== 'crm' || /drive/.test(d.url)) && <p className="text-xs text-gray-400">Les fichiers sont rangés dans votre Google Drive, dossier « CRM Portail client / {st.client.entreprise} ».</p>}
+    </div>
+  );
+}
+
+function AccesRubrique({ st, set }) {
+  const c = collecteDe(st);
+  const maj = (fn, log) => set(p => { const cc = collecteDe(p); return { ...p, collecte: { ...cc, acces: fn(cc.acces), journal: journaliser(cc, { origine: 'crm', rubrique: 'acces', ...log }) } }; });
+  const majA = (a, patch) => maj(l => l.map(x => x.id === a.id ? { ...x, ...patch } : x), { cle: 'acces.' + a.id + '.' + Object.keys(patch)[0], champ: 'Accès ' + a.plateforme, avant: patch.etat ? ETATS_ACCES[a.etat][0] : '', apres: patch.etat ? ETATS_ACCES[patch.etat][0] : Object.values(patch)[0] });
+  const inp = 'w-full rounded border border-gray-200 px-2 py-1 text-[13px]';
+  return (
+    <div className="space-y-2">
+      <p className="rounded-lg bg-red-50 px-3 py-2 text-xs text-red-800">🔒 Ne notez jamais de mot de passe ici. Demandez au client de vous inviter comme administrateur ou gestionnaire du compte.</p>
+      {c.acces.map(a => <div key={a.id} className="grid gap-2 rounded-xl bg-gray-50 p-3 sm:grid-cols-6">
+        <select value={a.plateforme} onChange={e => majA(a, { plateforme: e.target.value })} className={inp}>{PLATEFORMES.map(x => <option key={x}>{x}</option>)}</select>
+        <input value={a.lien} onChange={e => majA(a, { lien: e.target.value })} placeholder="Lien du compte" className={inp + ' sm:col-span-2'} />
+        <input value={a.emailAdmin} onChange={e => majA(a, { emailAdmin: e.target.value })} placeholder="Email administrateur" className={inp} />
+        <input value={a.proprietaire} onChange={e => majA(a, { proprietaire: e.target.value })} placeholder="Propriétaire" className={inp} />
+        <select value={a.etat} onChange={e => majA(a, { etat: e.target.value, ...(e.target.value === 'confirme' ? { verifieLe: isoJour() } : {}) })} className={'rounded px-2 py-1 text-[13px] font-semibold ' + ETATS_ACCES[a.etat][1]}>{Object.entries(ETATS_ACCES).map(([k, [l]]) => <option key={k} value={k}>{l}</option>)}</select>
+        <div className="flex items-center gap-2 text-xs text-gray-500 sm:col-span-6">{a.lien && <a href={a.lien} target="_blank" rel="noopener" className="underline">Ouvrir</a>}
+          <span>Vérifié le</span><input type="date" value={a.verifieLe || ''} onChange={e => majA(a, { verifieLe: e.target.value })} className="rounded border border-gray-200 px-1" />
+          <button onClick={() => majA(a, { verifieLe: isoJour() })} className="rounded bg-white px-2 py-0.5 ring-1 ring-gray-200">Vérifié aujourd'hui</button>
+          {a.source === 'portail' && <span className="text-violet-700">reçu du client</span>}
+          <button onClick={() => confirm('Retirer ce compte ?') && maj(l => l.filter(x => x.id !== a.id), { cle: 'acces.' + a.id, champ: 'Compte retiré', avant: a.plateforme, apres: '' })} className="ml-auto text-gray-300 hover:text-red-600">✕</button></div>
+      </div>)}
+      <button onClick={() => maj(l => [...l, { id: nouvelId(), plateforme: 'Instagram', lien: '', emailAdmin: '', proprietaire: 'Le client', etat: 'demander', verifieLe: '', source: 'crm' }], { cle: 'acces.nouveau', champ: 'Compte ajouté', avant: '', apres: '' })} className="rounded-lg bg-gray-100 px-3 py-1.5 text-sm font-semibold">+ Compte ou accès</button>
+    </div>
+  );
+}
+
+// Dossier de préparation : reçu, manquant, à valider, relance
+function Preparation({ st, set, id, toast, onSync, sync }) {
+  const c = collecteDe(st), e = etatCollecte(st), conf = confPortail(), cl = st.client || {};
+  const [ouvert, setOuvert] = useState(false);
+  const v = vendeurInfo((lireJSON(IDX) || {}).vendeur || st.vendeur || {});
+  const preparerLien = async () => { const r = await assurerJeton(id); if (!r.ok) { toast('Portail : ' + r.erreur); return null; } const n = lireJSON(DK(id)); set(p => ({ ...p, collecte: { ...collecteDe(p), token: n.collecte.token, lienCree: n.collecte.lienCree } })); return lienPortail(n); };
+  const message = (lien, relance) => [`Bonjour${cl.responsable ? ' ' + cl.responsable.split(' ')[0] : ''},`, '',
+    relance ? `Pour avancer sur votre projet, il me manque encore :\n${e.manquants.map(m => '• ' + m[0]).join('\n')}` : 'Pour préparer votre site, vos visuels et votre communication, voici votre espace pour m\'envoyer vos informations, photos et tarifs :',
+    '', relance ? 'Vous pouvez tout envoyer ici, en quelques minutes :' : '', lien, '', 'Merci !', [v.nom, v.tel].filter(Boolean).join(' · ')].filter((x, i, a) => x !== '' || a[i - 1] !== '').join('\n');
+  const envoyer = async (canal, relance) => {
+    const lien = await preparerLien(); if (!lien) return;
+    const txt = message(lien, relance);
+    if (canal === 'wa') window.open(`https://wa.me/${waNumber(cl.telephone)}?text=${encodeURIComponent(txt)}`, '_blank');
+    else if (canal === 'mail') window.location.href = `mailto:${encodeURIComponent(cl.email || '')}?subject=${encodeURIComponent(relance ? 'Éléments manquants pour votre projet' : 'Vos informations pour votre projet')}&body=${encodeURIComponent(txt)}`;
+    else { try { await navigator.clipboard.writeText(lien); toast('Lien du portail copié.'); } catch { prompt('Copiez le lien :', lien); } }
+    if (canal !== 'copie') set(p => { const su = p.suivi || {}; return { ...p, suivi: { ...su, historique: [...(su.historique || []), { date: new Date().toISOString(), type: 'message', texte: `${relance ? 'Relance des éléments manquants' : 'Lien du portail client'} préparé(e) (${canal === 'wa' ? 'WhatsApp' : 'email'})` }] } }; });
+  };
+  const decider = (a, accepter) => set(p => {
+    let n = p, cc = collecteDe(p);
+    if (accepter && a.type === 'champ') { n = ecrireChamp(p, a.rubrique, a.champ, a.proposee); cc = collecteDe(n); cc.origines = { ...cc.origines, [a.cle]: { origine: 'client', date: new Date().toISOString(), valeur: a.proposee } }; }
+    if (accepter && a.type === 'produit') cc = { ...cc, produits: cc.produits.map(x => x.id === a.produitId ? { ...x, prix: a.prix } : x) };
+    return { ...n, collecte: { ...cc, aValider: cc.aValider.filter(x => x !== a && !(x.cle === a.cle && x.proposee === a.proposee)), journal: journaliser(cc, { origine: 'crm', rubrique: a.rubrique || 'catalogue', cle: a.cle + '.decision', champ: a.libelle, avant: a.actuelle, apres: accepter ? a.proposee + ' (proposition du client acceptée)' : a.actuelle + ' (proposition « ' + a.proposee + ' » ignorée)' }) } };
+  });
+  const derniere = [c.derniereReponse, ...(st.suivi && st.suivi.historique || []).map(h => h.date), ...(c.journal || []).map(j => j.date)].filter(Boolean).sort().pop();
+  return (
+    <div className="rounded-2xl bg-white ring-1 ring-black/5">
+      <button onClick={() => setOuvert(!ouvert)} className="flex w-full flex-wrap items-center gap-3 px-4 py-3.5 text-left">
+        <span className="font-semibold">Dossier de préparation</span>
+        <span className="flex h-2 w-28 overflow-hidden rounded-full bg-gray-100"><span className="bg-violet-600" style={{ width: e.pct + '%' }} /></span>
+        <span className="text-sm text-gray-600">{e.pct} % · {e.recus.length}/{e.items.length} reçus</span>
+        {c.aValider.length > 0 && <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[11px] font-bold text-amber-900">{c.aValider.length} à valider</span>}
+        {c.nonLu > 0 && <span className="rounded-full bg-violet-600 px-2 py-0.5 text-[11px] font-bold text-white">{c.nonLu} nouveauté(s)</span>}
+        <span className="ml-auto text-gray-400">{ouvert ? '▴' : '▾'}</span>
+      </button>
+      {ouvert && <div className="space-y-3 border-t border-gray-100 px-4 py-4 text-sm">
+        {!conf.url && <p className="rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-900">Mode démonstration : le portail ne fonctionne que sur cet appareil. Connectez Google Drive dans <a href="#/reglages" className="font-semibold underline">Réglages</a> pour l'envoyer à vos clients.</p>}
+        <div className="grid gap-3 sm:grid-cols-2">
+          <div><p className="text-[11px] font-bold uppercase tracking-wider text-emerald-700">Informations reçues</p><ul className="mt-1 space-y-0.5">{e.recus.map(x => <li key={x[0]}>✓ {x[0]}</li>)}{!e.recus.length && <li className="text-gray-400">Rien pour l'instant</li>}</ul></div>
+          <div><p className="text-[11px] font-bold uppercase tracking-wider text-red-700">Informations manquantes</p><ul className="mt-1 space-y-0.5">{e.manquants.map(x => <li key={x[0]}>○ {x[0]}</li>)}{!e.manquants.length && <li className="text-emerald-700">Tout est là 🎉</li>}</ul></div>
+        </div>
+        <p className="text-gray-600"><b>Documents en attente :</b> {e.docsAttente.length ? e.docsAttente.join(', ') : 'aucun'} · <b>Dernière réponse du client :</b> {c.derniereReponse ? jourCourt(c.derniereReponse) : 'aucune'}{c.termineLe ? ' (formulaire validé)' : ''} · <b>Dernière activité :</b> {derniere ? jourCourt(derniere) : '—'} · <b>Prochaine action :</b> {(st.suivi || {}).prochaine && st.suivi.prochaine.action ? `${st.suivi.prochaine.action} (${jourCourt(st.suivi.prochaine.date)})` : '—'}</p>
+        {c.aValider.length > 0 && <div className="rounded-xl bg-amber-50 p-3 ring-1 ring-amber-200"><p className="font-semibold text-amber-900">Le client propose d'autres valeurs : à vérifier</p>
+          {c.aValider.map((a, i) => <div key={i} className="mt-2 flex flex-wrap items-center gap-2 text-[13px]"><span className="min-w-0 flex-1"><b>{a.libelle}</b> : actuel « {a.actuelle || '—'} » → client « {a.proposee} » <span className="text-gray-500">({jourCourt(a.date)})</span></span>
+            <button onClick={() => decider(a, true)} className="rounded-lg bg-emerald-600 px-2.5 py-1 font-semibold text-white">Accepter</button><button onClick={() => decider(a, false)} className="rounded-lg bg-white px-2.5 py-1 ring-1 ring-gray-200">Garder l'actuel</button></div>)}</div>}
+        <div className="flex flex-wrap gap-2">
+          {e.manquants.length > 0 && <><button onClick={() => envoyer('wa', true)} className="rounded-xl bg-[#25D366] px-3 py-2 font-semibold text-white">Demander les éléments manquants (WhatsApp)</button>
+            <button onClick={() => envoyer('mail', true)} className="rounded-xl border border-gray-200 px-3 py-2 font-medium">… par email</button></>}
+          <button onClick={() => envoyer('wa', false)} className="rounded-xl border border-gray-200 px-3 py-2 font-medium">Envoyer le lien du portail</button>
+          <button onClick={() => envoyer('copie', false)} className="rounded-xl border border-gray-200 px-3 py-2 font-medium">Copier le lien</button>
+          {c.token && <button onClick={onSync} disabled={sync} className="rounded-xl bg-violet-600 px-3 py-2 font-semibold text-white disabled:opacity-50">{sync ? 'Récupération…' : '↻ Récupérer les réponses'}</button>}
+        </div>
+        <p className="text-[11px] text-gray-400">Les messages s'ouvrent préremplis dans WhatsApp ou votre messagerie : rien n'est envoyé sans votre clic.</p>
+      </div>}
+    </div>
+  );
+}
+
+// ---------- portail côté client ----------
+function PagePortail({ hash }) {
+  const conf = useMemo(() => lire(hash.slice('#portail='.length)), [hash]);
+  const cleBrouillon = 'portail-brouillon-' + (conf && conf.t);
+  const [d, setD] = useState(() => { try { return { rubriques: {}, produits: [], acces: [], fichiers: [], ...(JSON.parse(localStorage.getItem(cleBrouillon) || 'null') || {}) }; } catch { return { rubriques: {}, produits: [], acces: [], fichiers: [] }; } });
+  const [etape, setEtape] = useState(0), [msg, setMsg] = useState(''), [envoi, setEnvoi] = useState(''), [fini, setFini] = useState(false);
+  useEffect(() => { try { localStorage.setItem(cleBrouillon, JSON.stringify(d)); } catch {} }, [d]);
+  if (!conf || !conf.t) return <div className="mx-auto max-w-md p-8 text-center"><p className="font-semibold">Ce lien est incomplet.</p><p className="text-sm text-gray-600">Demandez à votre prestataire de vous le renvoyer.</p></div>;
+  const toast = (m) => { setMsg(m); setTimeout(() => setMsg(''), 5000); };
+  const setChamp = (rub, k, v) => setD(x => ({ ...x, rubriques: { ...x.rubriques, [rub]: { ...(x.rubriques[rub] || {}), [k]: v } } }));
+  const enregistrer = async (termine) => {
+    setEnvoi('Enregistrement…');
+    const r = await appelPortail(conf.u, { action: 'submit', token: conf.t, client: conf.n, data: { rubriques: d.rubriques, produits: d.produits, acces: d.acces, termine: !!termine } });
+    setEnvoi('');
+    if (!r.ok) { toast('Envoi impossible : ' + r.erreur + '. Vos réponses restent enregistrées sur ce téléphone, réessayez.'); return false; }
+    toast(termine ? 'Merci ! Tout est bien envoyé.' : 'Enregistré ✓'); return true;
+  };
+  const envoyerFichiers = async (files, categorie, note) => {
+    for (const f of files) { setEnvoi(`Envoi de ${f.name}…`); const r = await envoyerFichier(conf.u, conf.t, conf.n, f, categorie, note);
+      if (r.ok) setD(x => ({ ...x, fichiers: [...x.fichiers, { nom: r.nom, categorie, url: r.url }], produits: note ? x.produits.map(p => p.nom === note ? { ...p, photo: r.url } : p) : x.produits }));
+      else toast(r.erreur); }
+    setEnvoi(''); toast('Fichier(s) envoyé(s) ✓');
+  };
+  const ETAPES_P = ['Votre entreprise', 'Produits et tarifs', 'Photos et vidéos', 'Site internet', 'Réseaux sociaux', 'Planning', 'Validation'];
+  const champ = (rub, [k, l, type]) => <label key={k} className="block"><span className="text-sm font-medium">{l}</span>
+    {type === 'textarea' ? <textarea rows={3} value={(d.rubriques[rub] || {})[k] || ''} onChange={e => setChamp(rub, k, e.target.value)} className="mt-1 w-full rounded-xl border border-gray-300 px-3 py-2.5 text-[15px]" />
+      : <input value={(d.rubriques[rub] || {})[k] || ''} onChange={e => setChamp(rub, k, e.target.value)} className="mt-1 w-full rounded-xl border border-gray-300 px-3 py-2.5 text-[15px]" />}</label>;
+  const upload = (categorie, label, note) => <label className="flex cursor-pointer items-center justify-between gap-3 rounded-xl border-2 border-dashed border-gray-300 px-4 py-3 hover:bg-gray-50">
+    <span><span className="block font-medium">{label}</span><span className="text-xs text-gray-500">{d.fichiers.filter(f => f.categorie === categorie && (!note || true)).length} fichier(s) envoyé(s)</span></span><span className="rounded-lg bg-ink px-3 py-1.5 text-sm font-semibold text-white">Ajouter</span>
+    <input type="file" multiple={!note} accept={categorie === 'tarifs' ? '.pdf,.xlsx,.xls,.csv,image/*' : categorie === 'videos' ? 'video/*' : categorie === 'documents' ? '*/*' : 'image/*'} className="hidden" onChange={e => { envoyerFichiers([...e.target.files], categorie, note); e.target.value = ''; }} /></label>;
+  const suivant = async () => { const ok = await enregistrer(false); if (ok) { setEtape(etape + 1); window.scrollTo(0, 0); } };
+  const corps = [
+    <div className="space-y-3">{RUBRIQUES_COLLECTE.entreprise.champs.map(c => champ('entreprise', c))}</div>,
+    <div className="space-y-3">
+      <p className="text-sm text-gray-600">Le plus simple : envoyez votre grille tarifaire ou votre menu (PDF, Excel ou photo). Vous pouvez aussi saisir vos produits un par un.</p>
+      {upload('tarifs', 'Grille tarifaire ou menu')}
+      {d.produits.map((p, i) => { const maj = (patch) => setD(x => ({ ...x, produits: x.produits.map((y, j) => j === i ? { ...y, ...patch } : y) }));
+        return <div key={i} className="space-y-2 rounded-xl bg-gray-50 p-3">
+          <div className="grid grid-cols-2 gap-2"><input value={p.categorie} onChange={e => maj({ categorie: e.target.value })} placeholder="Catégorie (pains, gâteaux…)" className="rounded-lg border border-gray-300 px-3 py-2" /><input value={p.nom} onChange={e => maj({ nom: e.target.value })} placeholder="Nom du produit" className="rounded-lg border border-gray-300 px-3 py-2" /></div>
+          <input value={p.description} onChange={e => maj({ description: e.target.value })} placeholder="Description (facultatif)" className="w-full rounded-lg border border-gray-300 px-3 py-2" />
+          <div className="grid grid-cols-2 gap-2 sm:grid-cols-4"><input value={p.prix} onChange={e => maj({ prix: e.target.value })} inputMode="decimal" placeholder="Prix TTC €" className="rounded-lg border border-gray-300 px-3 py-2" />
+            <select value={p.disponibilite} onChange={e => maj({ disponibilite: e.target.value })} className="rounded-lg border border-gray-300 px-2 py-2">{DISPOS.map(x => <option key={x}>{x}</option>)}</select>
+            <select value={p.saison} onChange={e => maj({ saison: e.target.value })} className="rounded-lg border border-gray-300 px-2 py-2"><option value="permanent">Permanent</option><option value="saisonnier">Saisonnier</option></select>
+            <select value={p.vente} onChange={e => maj({ vente: e.target.value })} className="rounded-lg border border-gray-300 px-2 py-2"><option value="boutique">En boutique</option><option value="commande">Sur commande</option></select></div>
+          <div className="flex items-center gap-2">{p.nom ? <label className="cursor-pointer rounded-lg bg-white px-3 py-1.5 text-sm ring-1 ring-gray-200">📷 {p.photo ? 'Photo envoyée ✓' : 'Ajouter une photo'}<input type="file" accept="image/*" className="hidden" onChange={e => { e.target.files[0] && envoyerFichiers([e.target.files[0]], 'produits', p.nom); e.target.value = ''; }} /></label> : <span className="text-xs text-gray-400">Donnez un nom pour ajouter une photo</span>}
+            <button onClick={() => setD(x => ({ ...x, produits: x.produits.filter((_, j) => j !== i) }))} className="ml-auto text-sm text-gray-400">Retirer</button></div>
+        </div>; })}
+      <button onClick={() => setD(x => ({ ...x, produits: [...x.produits, { categorie: (x.produits[x.produits.length - 1] || {}).categorie || '', nom: '', description: '', prix: '', disponibilite: 'Disponible', saison: 'permanent', vente: 'boutique' }] }))} className="w-full rounded-xl bg-gray-100 py-2.5 font-semibold">+ Ajouter un produit</button>
+    </div>,
+    <div className="space-y-2">{CATS_DOCS.filter(([k]) => k !== 'tarifs').map(([k, l]) => <div key={k}>{upload(k, l)}</div>)}
+      <p className="text-xs text-gray-500">Vidéos de plus de 25 Mo : envoyez plutôt un lien WeTransfer dans « Planning », champ délai ou dates.</p></div>,
+    <div className="space-y-3">{RUBRIQUES_COLLECTE.site.champs.map(c => champ('site', c))}</div>,
+    <div className="space-y-3">
+      <p className="rounded-xl bg-red-50 px-3 py-2 text-sm text-red-800">🔒 N'envoyez jamais vos mots de passe. Indiquez seulement le lien de vos comptes : je vous expliquerai comment m'inviter.</p>
+      {d.acces.map((a, i) => { const maj = (patch) => setD(x => ({ ...x, acces: x.acces.map((y, j) => j === i ? { ...y, ...patch } : y) }));
+        return <div key={i} className="space-y-2 rounded-xl bg-gray-50 p-3">
+          <select value={a.plateforme} onChange={e => maj({ plateforme: e.target.value })} className="w-full rounded-lg border border-gray-300 px-2 py-2">{PLATEFORMES.map(x => <option key={x}>{x}</option>)}</select>
+          <input value={a.lien} onChange={e => maj({ lien: e.target.value })} placeholder="Lien du compte (ou « à créer »)" className="w-full rounded-lg border border-gray-300 px-3 py-2" />
+          <input value={a.emailAdmin} onChange={e => maj({ emailAdmin: e.target.value })} placeholder="Email de connexion du compte (facultatif)" className="w-full rounded-lg border border-gray-300 px-3 py-2" />
+          <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={!!a.invitation} onChange={e => maj({ invitation: e.target.checked })} className="h-5 w-5" /> J'ai déjà envoyé une invitation d'accès</label>
+          <button onClick={() => setD(x => ({ ...x, acces: x.acces.filter((_, j) => j !== i) }))} className="text-sm text-gray-400">Retirer</button></div>; })}
+      <button onClick={() => setD(x => ({ ...x, acces: [...x.acces, { plateforme: 'Instagram', lien: '', emailAdmin: '', proprietaire: 'Le client', invitation: false }] }))} className="w-full rounded-xl bg-gray-100 py-2.5 font-semibold">+ Ajouter un compte</button>
+    </div>,
+    <div className="space-y-3">{RUBRIQUES_COLLECTE.planning.champs.map(c => champ('planning', c))}</div>,
+    <div className="space-y-2 text-sm">
+      <p>Vérifiez puis validez. Vous pourrez revenir compléter plus tard avec le même lien.</p>
+      <ul className="space-y-1 rounded-xl bg-gray-50 p-3">
+        <li>{Object.values(d.rubriques.entreprise || {}).filter(Boolean).length ? '✓' : '○'} Entreprise et coordonnées</li>
+        <li>{d.produits.length || d.fichiers.some(f => f.categorie === 'tarifs') ? '✓' : '○'} Produits et tarifs ({d.produits.length} produit(s))</li>
+        <li>{d.fichiers.filter(f => f.categorie !== 'tarifs').length ? '✓' : '○'} Photos et vidéos ({d.fichiers.filter(f => f.categorie !== 'tarifs').length} fichier(s))</li>
+        <li>{Object.values(d.rubriques.site || {}).filter(Boolean).length ? '✓' : '○'} Site internet</li>
+        <li>{d.acces.length ? '✓' : '○'} Réseaux sociaux ({d.acces.length})</li>
+        <li>{Object.values(d.rubriques.planning || {}).filter(Boolean).length ? '✓' : '○'} Planning</li>
+      </ul>
+    </div>,
+  ];
+  if (fini) return <div className="mx-auto max-w-md p-8 text-center"><p className="font-display text-2xl font-bold">Merci {((d.rubriques.entreprise || {}).gerant || '').split(' ')[0]} !</p><p className="mt-2 text-gray-600">Vos informations sont bien arrivées chez {conf.v || 'votre prestataire'}. Vous pouvez rouvrir ce lien à tout moment pour compléter.</p><button onClick={() => { setFini(false); setEtape(0); }} className="mt-4 rounded-xl bg-gray-100 px-4 py-2 font-semibold">Compléter</button></div>;
+  return (
+    <div className="mx-auto max-w-xl px-4 pb-32 pt-6">
+      {!conf.u && <p className="mb-3 rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-900">Mode démonstration : les réponses restent sur cet appareil.</p>}
+      <p className="text-xs font-bold uppercase tracking-wider text-gray-500">Espace client · {conf.n}</p>
+      <h1 className="font-display text-2xl font-bold">{ETAPES_P[etape]}</h1>
+      <div className="mt-2 flex gap-1">{ETAPES_P.map((x, i) => <button key={x} onClick={() => setEtape(i)} className={'h-1.5 flex-1 rounded-full ' + (i <= etape ? 'bg-violet-600' : 'bg-gray-200')} aria-label={x} />)}</div>
+      <p className="mt-1 text-xs text-gray-500">Étape {etape + 1} sur {ETAPES_P.length} · {conf.v ? `pour ${conf.v}` : ''} · enregistrement à chaque étape</p>
+      <div className="mt-5">{corps[etape]}</div>
+      <div className="fixed inset-x-0 bottom-0 border-t border-gray-200 bg-white/95 p-3 backdrop-blur" style={{ paddingBottom: 'calc(.75rem + env(safe-area-inset-bottom))' }}>
+        <div className="mx-auto flex max-w-xl gap-2">
+          {etape > 0 && <button onClick={() => setEtape(etape - 1)} className="rounded-xl px-4 py-3 font-medium text-gray-600">←</button>}
+          {etape < ETAPES_P.length - 1 ? <button onClick={suivant} disabled={!!envoi} className="flex-1 rounded-xl bg-ink py-3 font-semibold text-white disabled:opacity-60">{envoi || 'Enregistrer et continuer'}</button>
+            : <button onClick={async () => { if (await enregistrer(true)) setFini(true); }} disabled={!!envoi} className="flex-1 rounded-xl bg-emerald-600 py-3 font-semibold text-white disabled:opacity-60">{envoi || 'Valider et envoyer'}</button>}
+        </div>
+      </div>
+      <Toast msg={msg} />
+    </div>
+  );
+}
+
+// ---------- réglages ----------
+function PageReglages() {
+  const [idx, setIdx] = useState(() => lireJSON(IDX) || {});
+  const [p, setP] = useState(() => ({ url: '', cle: '', ...(idx.portail || {}) })), [test, setTest] = useState('');
+  const sauver = (n) => { const i = lireJSON(IDX); i.portail = n; ecrireJSON(IDX, i); setIdx(i); };
+  const tester = async () => { setTest('Test en cours…'); const r = await appelPortail(p.url.trim(), { action: 'ping', key: p.cle.trim() }, true);
+    setTest(!r.ok ? '✗ ' + r.erreur : r.local ? 'Mode démonstration (aucune URL) : fonctionne sur cet appareil seulement.' : r.admin ? '✓ Connexion réussie, clé d\'administration valide.' : '✗ Connexion OK mais clé d\'administration invalide.'); };
+  const v = idx.vendeur || {};
+  const setV = (k, val) => { const i = lireJSON(IDX); i.vendeur = { ...(i.vendeur || {}), [k]: val }; ecrireJSON(IDX, i); setIdx(i); };
+  return (
+    <Shell page="reglages">
+      <div className="mx-auto max-w-3xl space-y-4 px-4 pb-28 pt-6 sm:px-6">
+        <h1 className="font-display text-2xl font-bold sm:text-3xl">Réglages</h1>
+        <div className="rounded-2xl bg-white p-5 ring-1 ring-black/5">
+          <p className="font-semibold">Portail client · Google Drive et Sheets</p>
+          <p className="text-sm text-gray-500">Les réponses de vos clients arrivent dans une feuille Google, et leurs fichiers dans votre Drive. <a href="https://github.com/nynawedding/crm-proposition/blob/main/apps-script/LISEZMOI.md" target="_blank" rel="noopener" className="underline">Guide d'installation (5 min)</a> · <a href="https://github.com/nynawedding/crm-proposition/blob/main/apps-script/Code.gs" target="_blank" rel="noopener" className="underline">script à copier</a></p>
+          <div className="mt-3 grid gap-2">
+            <label className="text-sm"><span className="text-[11px] font-bold uppercase tracking-wider text-gray-500">URL de l'application Web (…/exec)</span><input value={p.url} onChange={e => setP({ ...p, url: e.target.value })} placeholder="https://script.google.com/macros/s/…/exec" className="mt-1 w-full rounded-lg border border-gray-200 px-3 py-2" /></label>
+            <label className="text-sm"><span className="text-[11px] font-bold uppercase tracking-wider text-gray-500">Clé d'administration</span><input type="password" value={p.cle} onChange={e => setP({ ...p, cle: e.target.value })} className="mt-1 w-full rounded-lg border border-gray-200 px-3 py-2" /></label>
+            <div className="flex flex-wrap items-center gap-2"><button onClick={() => { sauver({ url: p.url.trim(), cle: p.cle.trim() }); tester(); }} className="rounded-xl bg-ink px-4 py-2 text-sm font-semibold text-white">Enregistrer et tester la connexion</button><span className="text-sm">{test}</span></div>
+            <p className="text-xs text-gray-400">La clé reste sur cet appareil (incluse dans vos sauvegardes) et n'est jamais mise dans les liens envoyés aux clients.</p>
+          </div>
+        </div>
+        <div className="rounded-2xl bg-white p-5 ring-1 ring-black/5">
+          <p className="font-semibold">Vos coordonnées (devis, factures, portail)</p>
+          <div className="mt-3 grid gap-2 sm:grid-cols-2">{[['civilite', 'Civilité'], ['nom', 'Nom'], ['societe', 'Société ou nom complet'], ['statut', 'Statut'], ['adresse', 'Adresse professionnelle'], ['telephone', 'Téléphone'], ['email', 'Email'], ['siret', 'SIRET']].map(([k, l]) =>
+            <label key={k} className="text-sm"><span className="text-[11px] font-bold uppercase tracking-wider text-gray-500">{l}</span><input value={v[k] ?? DEFAULTS.vendeur[k] ?? ''} onChange={e => setV(k, e.target.value)} className="mt-1 w-full rounded-lg border border-gray-200 px-3 py-2" /></label>)}</div>
+        </div>
+      </div>
+    </Shell>
+  );
 }
 
 function App({ dossierId }) {
