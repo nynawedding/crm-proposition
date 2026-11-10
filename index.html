@@ -1343,8 +1343,12 @@ function Devis({ s, d, numero, onBack, toast, dateFixe, barre, bandeau, signatur
           </div>
           <div>
             <p className="text-sm font-semibold">{vendeurInfo(v).societe || vendeurInfo(v).nom || 'Le prestataire'}</p>
-            <p className="text-xs text-gray-500">Date et signature</p>
-            <div className="mt-2 h-24 rounded-xl border border-dashed border-gray-300" />
+            {v.signatureImg || (v.signature && v.signature.length) ? <div className="mt-2 rounded-xl border border-gray-200 p-2">
+              {v.signatureImg ? <img src={v.signatureImg} alt="Signature" className="h-24 w-auto max-w-full object-contain" />
+                : <svg viewBox="0 0 600 200" className="h-24 w-full"><path d={traitsPath(v.signature)} fill="none" stroke="#0b1b33" strokeWidth="3.2" strokeLinecap="round" strokeLinejoin="round" /></svg>}
+              <p className="text-[12px] font-semibold text-gray-700">Signé par {vendeurInfo(v).nom} le {date}</p>
+            </div> : <><p className="text-xs text-gray-500">Date et signature</p>
+              <div className="mt-2 h-24 rounded-xl border border-dashed border-gray-300" /></>}
           </div>
         </section>
       </article>
@@ -1887,7 +1891,8 @@ const sauverDossier = (id, st) => {
   }
   ecrireJSON(DK(id), st);
   const idx = lireJSON(IDX); if (!idx) return;
-  idx.vendeur = st.vendeur;
+  // coordonnées du vendeur : mises à jour seulement si elles ont été modifiées sur cet écran (pas d'écrasement par une copie ancienne)
+  if (!disque || JSON.stringify(disque.vendeur || {}) !== JSON.stringify(st.vendeur || {})) idx.vendeur = { ...(idx.vendeur || {}), ...(st.vendeur || {}) };
   const i = idx.dossiers.findIndex(x => x.id === id);
   const e = entreeDe(id, st, i >= 0 ? idx.dossiers[i] : {});
   if (i >= 0) idx.dossiers[i] = e; else idx.dossiers.push(e);
@@ -3924,6 +3929,41 @@ function PagePortail({ hash }) {
 }
 
 // ---------- réglages ----------
+// votre signature, ajoutée automatiquement sur vos devis
+function SignatureVendeur({ v, onChange }) {
+  const ref = useRef(), traits = useRef([]), enCours = useRef(null), fic = useRef();
+  const [vide, setVide] = useState(true), [edition, setEdition] = useState(!(v.signature && v.signature.length) && !v.signatureImg);
+  const dessine = () => { const c = ref.current; if (!c) return; const ctx = c.getContext('2d'); ctx.clearRect(0, 0, c.width, c.height); ctx.lineWidth = 3.2; ctx.lineCap = 'round'; ctx.lineJoin = 'round'; ctx.strokeStyle = '#0b1b33'; ctx.stroke(new Path2D(traitsPath(traits.current))); };
+  const pt = (e) => { const r = ref.current.getBoundingClientRect(); return [Math.round((e.clientX - r.left) / r.width * 600), Math.round((e.clientY - r.top) / r.height * 200)]; };
+  const down = (e) => { e.preventDefault(); ref.current.setPointerCapture(e.pointerId); enCours.current = [pt(e)]; traits.current.push(enCours.current); setVide(false); dessine(); };
+  const move = (e) => { if (!enCours.current) return; const p = pt(e), l = enCours.current[enCours.current.length - 1]; if (Math.abs(p[0] - l[0]) + Math.abs(p[1] - l[1]) >= 3) { enCours.current.push(p); dessine(); } };
+  const importer = async (f) => { try { const d = await compress(f, 600, 0.9); onChange({ signatureImg: d, signature: [] }); setEdition(false); } catch { alert('Image illisible.'); } };
+  const a = (v.signature && v.signature.length) || v.signatureImg;
+  return (
+    <div className="mt-3 rounded-xl bg-gray-50 p-3">
+      <p className="text-[11px] font-bold uppercase tracking-wider text-gray-500">Votre signature (ajoutée sur vos devis)</p>
+      {!edition && a ? <div className="mt-2 flex flex-wrap items-center gap-3">
+        <div className="rounded-lg bg-white p-2 ring-1 ring-gray-200">{v.signatureImg ? <img src={v.signatureImg} alt="Signature" className="h-16 w-auto" /> : <svg viewBox="0 0 600 200" className="h-16 w-48"><path d={traitsPath(v.signature)} fill="none" stroke="#0b1b33" strokeWidth="3.2" strokeLinecap="round" strokeLinejoin="round" /></svg>}</div>
+        <button onClick={() => { traits.current = []; setVide(true); setEdition(true); }} className="rounded-lg bg-white px-3 py-1.5 text-sm ring-1 ring-gray-200">Refaire</button>
+        <button onClick={() => confirm('Retirer votre signature des devis ?') && onChange({ signature: [], signatureImg: '' })} className="text-sm text-gray-400 hover:text-red-600">Retirer</button>
+      </div> : <div className="mt-2 space-y-2">
+        <div className="relative">
+          <canvas ref={ref} width="600" height="200" onPointerDown={down} onPointerMove={move} onPointerUp={() => { enCours.current = null; }} onPointerCancel={() => { enCours.current = null; }}
+            className="h-32 w-full max-w-md rounded-xl border-2 border-dashed border-gray-300 bg-white" style={{ touchAction: 'none' }} />
+          {vide && <p className="pointer-events-none absolute inset-0 grid max-w-md place-items-center text-sm text-gray-400">Signez ici (souris, doigt ou stylet)</p>}
+        </div>
+        <div className="flex flex-wrap gap-2">
+          <button disabled={vide} onClick={() => { onChange({ signature: traits.current, signatureImg: '' }); setEdition(false); }} className="rounded-lg bg-ink px-3 py-1.5 text-sm font-semibold text-white disabled:opacity-40">Enregistrer ma signature</button>
+          <button onClick={() => { traits.current = []; setVide(true); dessine(); }} className="rounded-lg bg-white px-3 py-1.5 text-sm ring-1 ring-gray-200">Effacer</button>
+          <button onClick={() => fic.current.click()} className="rounded-lg bg-white px-3 py-1.5 text-sm ring-1 ring-gray-200">ou importer une photo de ma signature</button>
+          <input ref={fic} type="file" accept="image/*" className="hidden" onChange={e => { e.target.files[0] && importer(e.target.files[0]); e.target.value = ''; }} />
+          {a && <button onClick={() => setEdition(false)} className="text-sm text-gray-500">Annuler</button>}
+        </div>
+      </div>}
+    </div>
+  );
+}
+
 function PageReglages() {
   const [idx, setIdx] = useState(() => lireJSON(IDX) || {});
   const [p, setP] = useState(() => ({ url: '', cle: '', ...(idx.portail || {}) })), [test, setTest] = useState('');
@@ -3948,6 +3988,7 @@ function PageReglages() {
         </div>
         <div className="rounded-2xl bg-white p-5 ring-1 ring-black/5">
           <p className="font-semibold">Vos coordonnées (devis, factures, portail)</p>
+          <SignatureVendeur v={v} onChange={(patch) => { const i = lireJSON(IDX); i.vendeur = { ...(i.vendeur || {}), ...patch }; ecrireJSON(IDX, i); setIdx(i); }} />
           <div className="mt-3 grid gap-2 sm:grid-cols-2">{[['civilite', 'Civilité'], ['nom', 'Nom'], ['societe', 'Société ou nom complet'], ['statut', 'Statut'], ['adresse', 'Adresse professionnelle'], ['telephone', 'Téléphone'], ['email', 'Email'], ['siret', 'SIRET']].map(([k, l]) =>
             <label key={k} className="text-sm"><span className="text-[11px] font-bold uppercase tracking-wider text-gray-500">{l}</span><input value={v[k] ?? DEFAULTS.vendeur[k] ?? ''} onChange={e => setV(k, e.target.value)} className="mt-1 w-full rounded-lg border border-gray-200 px-3 py-2" /></label>)}</div>
         </div>
