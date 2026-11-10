@@ -1110,17 +1110,24 @@ function Devis({ s, d, numero, onBack, toast, dateFixe, barre, bandeau, signatur
   const [envoi, setEnvoi] = useState(null); // { lien, empreinte } du lien de signature
   const faireSigner = async () => {
     if (envoi) return setEnvoi(null);
-    const payload = LZString.compressToEncodedURIComponent(JSON.stringify(snapDevis(s, d, numero)));
+    setEnvoi({ chargement: true });
+    const conf = confPortail();
+    let portail = '';
+    if (DOSSIER_COURANT) { const r = await assurerJeton(DOSSIER_COURANT); if (r.ok) portail = lienPortail(lireJSON(DK(DOSSIER_COURANT))); }
+    const payload = LZString.compressToEncodedURIComponent(JSON.stringify({ ...snapDevis(s, d, numero), portail }));
     const empreinte = await empreinteDe(payload);
-    const lien = `${location.origin}${location.pathname}#signer=${payload}`;
-    setEnvoi({ lien, empreinte });
-    onEnvoi && onEnvoi(numero, empreinte);
+    let lien = `${location.origin}${location.pathname}#signer=${payload}`, docId = '';
+    if (!conf.url || conf.cle) { const r = await appelPortail(conf.url, { action: 'stocker', key: conf.cle, contenu: payload, client: cl.entreprise || '', type: 'devis' }); if (r.ok) { docId = r.id; lien = lienCourt(r.id, conf.url); } }
+    setEnvoi({ lien, empreinte, court: !!docId, portail: !!portail });
+    onEnvoi && onEnvoi(numero, empreinte, docId);
   };
   useEffect(() => { if (signerAuto && !signature) faireSigner(); }, []);
-  const msgSigner = envoi && [`Bonjour${cl.responsable ? ' ' + cl.responsable.split(' ')[0] : ''},`, '',
-    `Voici votre devis N° ${numero} (${d.titre}) à signer en ligne :`, envoi.lien, '',
-    'Ouvrez le lien, vérifiez le devis, puis signez avec le doigt en bas de la page.', '',
-    [vendeurInfo(v).nom, vendeurInfo(v).societe, vendeurInfo(v).tel].filter(Boolean).join(' · ')].join('\n');
+  const msgSigner = envoi && envoi.lien && [`Bonjour${cl.responsable ? ' ' + cl.responsable.split(' ')[0] : ''},`, '',
+    `Votre devis N° ${numero} (${d.titre}) est prêt à être signé en ligne.`, '',
+    `👉 Signer le devis : ${envoi.lien}`, '',
+    'Il vous suffit d\'ouvrir le lien, de vérifier le devis, puis de signer avec le doigt en bas de la page.',
+    ...(envoi.portail ? ['Une fois le devis signé, vous accédez à votre espace client pour m\'envoyer vos photos, vos tarifs et vos informations.'] : []), '',
+    'Belle journée,', vendeurInfo(v).nom, [vendeurInfo(v).tel, vendeurInfo(v).email].filter(Boolean).join(' · ')].join('\n');
   const texte = [
     `Bonjour${cl.responsable ? ' ' + cl.responsable.split(' ')[0] : ''},`, '',
     `Voici votre devis N° ${numero} : ${d.titre}.`,
@@ -1190,10 +1197,11 @@ function Devis({ s, d, numero, onBack, toast, dateFixe, barre, bandeau, signatur
         </>}
       </div>
       {bandeau}
-      {envoi && (
+      {envoi && envoi.chargement && <div className="no-print mx-auto max-w-[1040px] border-b border-amber-200 bg-amber-50 px-4 py-4 text-sm sm:px-6">Préparation du lien de signature…</div>}
+      {envoi && !envoi.chargement && (
         <div className="no-print mx-auto max-w-[1040px] border-b border-amber-200 bg-amber-50 px-4 py-4 sm:px-6">
           <p className="font-semibold">✍ Signature électronique du devis N° {numero}</p>
-          <p className="text-sm text-gray-600">Le client ouvre le lien sur son téléphone ou sa tablette, signe avec le doigt, puis vous renvoie le devis signé. Gratuit.</p>
+          <p className="text-sm text-gray-600">{envoi.court ? 'Lien court : le client ouvre le devis, signe avec le doigt, et sa signature arrive toute seule dans votre CRM.' : 'Le client ouvre le lien sur son téléphone ou sa tablette, signe avec le doigt, puis vous renvoie le devis signé.'}{envoi.portail ? ' Après la signature, il accède à son espace client.' : ''}</p>
           <div className="mt-3 flex flex-wrap gap-2">
             <button onClick={() => { window.open(`https://wa.me/${waNumber(cl.telephone)}?text=${encodeURIComponent(msgSigner)}`, '_blank'); toast('WhatsApp est ouvert avec le lien de signature. Il ne reste qu\'à envoyer.'); }}
               className="rounded-xl bg-[#25D366] px-4 py-2 text-sm font-semibold text-white">Envoyer par WhatsApp</button>
@@ -1441,12 +1449,23 @@ const enregistrerSignature = (snap, sig) => {
 };
 
 // Page ouverte par le client (#signer=…) ou par vous au retour (#signe=…)
-function PageSignature({ hash }) {
+// lien court #s=identifiant : le devis est lu dans la feuille Google
+function PageDevisCourt({ hash }) {
+  const q = new URLSearchParams(hash.slice(1)), id = q.get('s') || '', url = q.get('u') === 'local' ? '' : (q.get('u') || PORTAIL_URL_DEFAUT);
+  const [etat, setEtat] = useState(null);
+  useEffect(() => { appelPortail(url, { action: 'lire', id }, true).then(setEtat); }, []);
+  if (!etat) return <div className="grid min-h-screen place-items-center text-gray-500">Chargement de votre devis…</div>;
+  if (!etat.ok) return <div className="mx-auto max-w-md p-8 text-center"><p className="font-semibold">Ce devis est introuvable.</p><p className="text-sm text-gray-600">Le lien est peut-être incomplet. Demandez à votre prestataire de vous le renvoyer.</p></div>;
+  return <PageSignature hash={'#signer=' + etat.contenu} doc={{ id, url, sig: etat.sig }} />;
+}
+
+function PageSignature({ hash, doc }) {
   const retour = hash.startsWith('#signe=');
   const brut = hash.slice(retour ? 7 : 8);
   const [payload, sigTxt] = brut.split('.');
   const snap = useMemo(() => lire(payload), [payload]);
-  const [sig, setSig] = useState(() => (retour ? lire(sigTxt) : null));
+  const [sig, setSig] = useState(() => (retour ? lire(sigTxt) : doc && doc.sig ? doc.sig : null));
+  const [transmis, setTransmis] = useState(() => !!(doc && doc.sig));
   const [empreinte, setEmpreinte] = useState('');
   const [msg, setMsg] = useState('');
   const [dansCrm, setDansCrm] = useState(false);
@@ -1458,7 +1477,9 @@ function PageSignature({ hash }) {
   FRANCHISE = num(snap.s.tva) === 0;
   const v = snap.s.vendeur || {}, cl = snap.s.client || {};
   const toast = (m) => { setMsg(m); setTimeout(() => setMsg(''), 4500); };
-  const signer = (x) => { const full = { ...x, empreinte }; setSig(full); setDansCrm(enregistrerSignature(snap, { ...full, payload })); window.scrollTo(0, 0); document.getElementById('proposal-overlay').scrollTo(0, 0); };
+  const signer = async (x) => { const full = { ...x, empreinte }; setSig(full); setDansCrm(enregistrerSignature(snap, { ...full, payload })); window.scrollTo(0, 0); document.getElementById('proposal-overlay').scrollTo(0, 0);
+    if (doc) { const r = await appelPortail(doc.url, { action: 'signer', id: doc.id, sig: { nom: x.nom, traits: x.traits, quand: x.quand } }); setTransmis(!!r.ok); if (!r.ok) toast('Transmission impossible : ' + r.erreur + '. Renvoyez le devis signé avec les boutons ci-dessous.'); } };
+  const espace = snap && snap.portail;
   const lienRetour = sig && `${location.origin}${location.pathname}#signe=${payload}.${LZString.compressToEncodedURIComponent(JSON.stringify({ nom: sig.nom, traits: sig.traits, quand: sig.quand }))}`;
   const texteRetour = sig && [`Bonjour${v.nom ? ' ' + v.nom.split(' ')[0] : ''},`, '', `Voici le devis N° ${snap.numero} signé par ${sig.nom}${cl.entreprise ? ' (' + cl.entreprise + ')' : ''} :`, lienRetour].join('\n');
   const btn = 'rounded-xl px-4 py-2 text-sm font-semibold';
@@ -1480,7 +1501,10 @@ function PageSignature({ hash }) {
           {dansCrm === 'orphelin' ? ' Aucun dossier ne correspond : la signature est mise de côté dans « Mes clients », à rattacher.' : dansCrm ? ' Signature enregistrée dans le dossier du client.' : ''} Cliquez sur « PDF » pour l'archiver.</p>
       </> : <>
         <p className="font-semibold text-emerald-900">Merci {sig.nom.split(' ')[0]}, votre devis est signé.</p>
-        {dansCrm ? <p className="text-sm text-gray-700">La signature est enregistrée dans le CRM. Vous pouvez rendre la tablette.</p> : <>
+        {transmis && <p className="text-sm text-gray-700">✓ Votre signature a bien été transmise à {vendeurInfo(v).nom || 'votre prestataire'}. Vous pouvez télécharger votre exemplaire avec « PDF ».</p>}
+        {espace && <a href={espace} className="mt-3 inline-block rounded-xl bg-violet-600 px-5 py-3 font-semibold text-white">Accéder à mon espace client →</a>}
+        {espace && <p className="mt-1 text-xs text-gray-600">Votre espace pour m'envoyer vos photos, vos tarifs et vos informations, à votre rythme.</p>}
+        {transmis ? null : dansCrm ? <p className="text-sm text-gray-700">La signature est enregistrée dans le CRM. Vous pouvez rendre la tablette.</p> : <>
           <p className="text-sm text-gray-700">Dernière étape : renvoyez le devis signé {vendeurInfo(v).societe || vendeurInfo(v).nom ? 'à ' + (vendeurInfo(v).societe || vendeurInfo(v).nom) : 'à votre prestataire'}.</p>
           <div className="mt-3 flex flex-wrap gap-2">
             {v.telephone && <button onClick={() => window.open(`https://wa.me/${waNumber(v.telephone)}?text=${encodeURIComponent(texteRetour)}`, '_blank')} className={btn + ' bg-[#25D366] text-white'}>Renvoyer par WhatsApp</button>}
@@ -1503,8 +1527,9 @@ function PageSignature({ hash }) {
 function Racine() {
   const [hash, setHash] = useState(location.hash);
   useEffect(() => { const f = () => setHash(location.hash); window.addEventListener('hashchange', f); return () => window.removeEventListener('hashchange', f); }, []);
-  const [crm] = useState(() => (hash.startsWith('#signer=') || hash.startsWith('#signe=') || hash.startsWith('#portail=') ? null : initCRM()));
+  const [crm] = useState(() => (hash.startsWith('#signer=') || hash.startsWith('#signe=') || hash.startsWith('#portail=') || hash.startsWith('#s=') ? null : initCRM()));
   if (hash.startsWith('#portail=')) return <PagePortail hash={hash} />;
+  if (hash.startsWith('#s=')) return <PageDevisCourt key={hash} hash={hash} />;
   if (hash.startsWith('#signer=') || hash.startsWith('#signe=')) return <PageSignature key={hash} hash={hash} />;
   if (!crm && !lireJSON(IDX)) return <App />; // reprise impossible : l'ancien CRM reste utilisable tel quel
   const m = hash.match(/^#\/c\/([\w-]+)(\/proposition)?/);
@@ -1856,6 +1881,8 @@ const sauverDossier = (id, st) => {
   if (disque) {
     const manquantes = Object.keys(disque.signes || {}).filter(k => !(st.signes || {})[k]);
     if (manquantes.length) st = { ...st, signes: { ...disque.signes, ...st.signes }, suivi: disque.suivi }; // signature reçue ailleurs : on la garde
+    // identifiant du portail client créé pendant que cet écran était ouvert : on le garde
+    if (disque.collecte && disque.collecte.token && !(st.collecte && st.collecte.token)) st = { ...st, collecte: { ...(st.collecte || {}), token: disque.collecte.token, lienCree: disque.collecte.lienCree } };
     if (JSON.stringify(disque) === JSON.stringify(st)) return st; // rien n'a changé : on ne touche à rien
   }
   ecrireJSON(DK(id), st);
@@ -2468,10 +2495,9 @@ function Fiche360({ id }) {
   useEffect(() => { try { const r = sauverDossier(id, st); if (r && r !== st && Object.keys(r.signes || {}).length !== Object.keys(st.signes || {}).length) setSt(r); } catch { toast('Mémoire pleine : enregistrement impossible.'); } }, [st]);
   // nouvelles réponses du portail : récupérées à l'ouverture de la fiche
   const recuperer = async (silencieux) => {
-    if (!(collecteDe(lireJSON(DK(id)) || {})).token) return;
     setSync(true); const r = await synchroniserPortail([id]); setSync(false);
     if (!r.ok) { if (!silencieux) toast('Portail : ' + r.erreur); return; }
-    if (r.n) { setSt(load(lireJSON(DK(id)))); toast(`${r.n} nouvelle(s) information(s) reçue(s) du client.`); } else if (!silencieux) toast('Aucune nouvelle réponse.');
+    if (r.n) { setSt(load(lireJSON(DK(id)))); toast(r.signes ? `✍ Devis signé par le client : signature enregistrée.` : `${r.n} nouvelle(s) information(s) reçue(s) du client.`); } else if (!silencieux) toast('Aucune nouvelle réponse.');
   };
   useEffect(() => { recuperer(true); }, []);
   FRANCHISE = num(st.tva) === 0;
@@ -3398,13 +3424,21 @@ const lireFichier = (f) => new Promise((ok, ko) => { const r = new FileReader();
 
 // ---------- configuration et transport ----------
 const confPortail = () => ({ url: '', cle: '', ...(((lireJSON(IDX) || {}).portail) || {}) });
-const LOCAL_SRV = 'crm-portail-local'; // mode démonstration : le « serveur » est ce navigateur
+const LOCAL_SRV = 'crm-portail-local';
+// adresse publique du script Google de Hafid : permet des liens courts (#s=identifiant) lisibles sur le téléphone du client
+const PORTAIL_URL_DEFAUT = 'https://script.google.com/macros/s/AKfycbwN5bVeW9z9gr5F7S_GrMMP6b2srI-7pqQ1icUW4we6JQtRbdLVWSHHAtYWIEnwcel5/exec';
+const lienCourt = (id, url) => `${location.origin}${location.pathname}#s=${id}${!url ? '&u=local' : url !== PORTAIL_URL_DEFAUT ? '&u=' + encodeURIComponent(url) : ''}`; // mode démonstration : le « serveur » est ce navigateur
 function serveurLocal(p) {
   const s = { clients: {}, reponses: [], fichiers: [], ...(lireJSON(LOCAL_SRV) || {}) }, now = new Date().toISOString();
   const ok = (o) => { ecrireJSON(LOCAL_SRV, s); return { ok: true, ...o }; };
   if (p.action === 'ping') return { ok: true, admin: true, local: true };
   if (p.action === 'register') { s.clients[p.token] = p.client; return ok({}); }
-  if (!['pull'].includes(p.action) && !s.clients[p.token]) return { ok: false, erreur: 'lien de portail invalide' };
+  s.docs = s.docs || {};
+  if (p.action === 'stocker') { const id = nouvelId().slice(0, 10); s.docs[id] = { contenu: p.contenu, sig: null }; return ok({ id }); }
+  if (p.action === 'lire') return s.docs[p.id] ? { ok: true, contenu: s.docs[p.id].contenu, sig: s.docs[p.id].sig } : { ok: false, erreur: 'devis introuvable' };
+  if (p.action === 'signer') { if (!s.docs[p.id]) return { ok: false, erreur: 'devis introuvable' }; if (!s.docs[p.id].sig) s.docs[p.id].sig = p.sig; return ok({}); }
+  if (p.action === 'signatures') return { ok: true, signatures: String(p.ids).split(',').filter(id => s.docs[id] && s.docs[id].sig).map(id => ({ id, contenu: s.docs[id].contenu, sig: s.docs[id].sig })) };
+  if (['submit', 'upload'].includes(p.action) && !s.clients[p.token]) return { ok: false, erreur: 'lien de portail invalide' };
   if (p.action === 'submit') { s.reponses.push({ date: now, token: p.token, data: p.data }); return ok({ date: now }); }
   if (p.action === 'upload') { const id = 'loc-' + nouvelId(); s.fichiers.push({ date: now, token: p.token, categorie: p.categorie, nom: p.nom, id, url: `data:${p.mime};base64,${p.base64}`, mime: p.mime, taille: Math.round((p.base64 || '').length * 0.75), source: p.key ? 'crm' : 'portail', note: p.note || '' }); try { return ok({ id, url: s.fichiers[s.fichiers.length - 1].url, date: now }); } catch { s.fichiers.pop(); return { ok: false, erreur: 'mémoire de démonstration pleine' }; } }
   if (p.action === 'pull') { const t = new Set(String(p.tokens).split(',')); const d = p.depuis || '';
@@ -3513,9 +3547,18 @@ function fusionnerCollecte(st0, reponses, fichiers) {
 // récupère les réponses du portail pour un ou plusieurs dossiers
 async function synchroniserPortail(ids) {
   const conf = confPortail(), idx = lireJSON(IDX) || { dossiers: [] };
-  const cibles = (ids || idx.dossiers.map(d => d.id)).map(id => ({ id, st: lireJSON(DK(id)) })).filter(x => x.st && x.st.collecte && x.st.collecte.token);
-  if (!cibles.length) return { ok: true, n: 0 };
   if (conf.url && !conf.cle) return { ok: false, erreur: 'clé d\'administration manquante (Réglages)' };
+  const tous = (ids || idx.dossiers.map(d => d.id)).map(id => ({ id, st: lireJSON(DK(id)) })).filter(x => x.st);
+  // devis envoyés par lien court et pas encore signés : la signature du client est-elle arrivée ?
+  let signes = 0;
+  const attente = tous.flatMap(({ st }) => Object.entries(st.envois || {}).filter(([n, e]) => e.docId && !(st.signes || {})[n]).map(([, e]) => e.docId));
+  if (attente.length) {
+    const rs = await appelPortail(conf.url, { action: 'signatures', key: conf.cle, ids: attente.join(',') }, true);
+    if (rs.ok) for (const x of rs.signatures) { const snap = lire(x.contenu); if (!snap) continue;
+      const r = enregistrerSignature(snap, { ...x.sig, empreinte: await empreinteDe(x.contenu), payload: x.contenu }); if (r && r !== 'orphelin') signes++; }
+  }
+  const cibles = tous.map(x => ({ ...x, st: lireJSON(DK(x.id)) })).filter(x => x.st && x.st.collecte && x.st.collecte.token);
+  if (!cibles.length) return { ok: true, n: signes, signes };
   const r = await appelPortail(conf.url, { action: 'pull', key: conf.cle, tokens: cibles.map(x => x.st.collecte.token).join(',') }, true);
   if (!r.ok) return r;
   let total = 0;
@@ -3525,7 +3568,7 @@ async function synchroniserPortail(ids) {
     if (k) { sauverDossier(id, n); total += k; }
   });
   const i2 = lireJSON(IDX); if (i2) { i2.portailSync = new Date().toISOString(); ecrireJSON(IDX, i2); }
-  return { ok: true, n: total };
+  return { ok: true, n: total + signes, signes };
 }
 
 // progression de la collecte et éléments manquants
@@ -4382,12 +4425,12 @@ function App({ dossierId }) {
         if (snapS) return <Devis s={{ ...snapS.s, visuels: s.visuels }} d={snapS.d} numero={numero} dateFixe={snapS.date} toast={toast} onBack={() => setShowDevis(false)} signature={sg} />;
         const d = devisCalc(s, c); return d
         ? <Devis s={s} d={d} numero={numero} toast={toast} onBack={() => setShowDevis(false)} signature={(s.signes || {})[numero]} signerAuto={signerAuto}
-            onEnvoi={(n, e) => set(p => {
+            onEnvoi={(n, e, docId) => set(p => {
               const deja = (p.envois || {})[n], su = p.suivi;
               const suivi = su && !deja ? { ...su, etape: rangEtape(su.etape) < rangEtape('proposition') ? 'proposition' : su.etape,
                 ...(su.etape !== 'signe' ? { prochaine: { date: plusJours(3), action: 'Relancer pour la signature du devis' } } : {}),
                 historique: [...(su.historique || []), { date: new Date().toISOString(), type: 'auto', texte: `Lien de signature du devis ${n} créé` }] } : su;
-              return { envois: { ...(p.envois || {}), [n]: { empreinte: e, date: new Date().toISOString() } }, ...(suivi ? { suivi } : {}) };
+              return { envois: { ...(p.envois || {}), [n]: { empreinte: e, date: new Date().toISOString(), ...(docId ? { docId } : (deja && deja.docId ? { docId: deja.docId } : {})) } }, ...(suivi ? { suivi } : {}) };
             })} />
         : (setTimeout(() => setShowDevis(false)), null); })()}
       <Toast msg={msg} />

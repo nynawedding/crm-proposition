@@ -39,6 +39,10 @@ function router(p) {
       case 'submit': exigerJeton(p.token); feuille('Reponses').appendRow([new Date(), p.token, p.client || '', JSON.stringify(p.data || {})]); return { ok: true, date: new Date().toISOString() };
       case 'upload': return televerser(p, admin);
       case 'pull': exiger(admin); return tirer(String(p.tokens || '').split(',').filter(String), p.depuis || '');
+      case 'stocker': exiger(admin); return stocker(p);
+      case 'lire': return lireDoc(String(p.id || ''));
+      case 'signer': return signerDoc(String(p.id || ''), p.sig);
+      case 'signatures': exiger(admin); return signatures(String(p.ids || '').split(',').filter(String));
       default: return { ok: false, erreur: 'action inconnue' };
     }
   } catch (err) { return { ok: false, erreur: String(err && err.message || err) }; }
@@ -75,4 +79,36 @@ function tirer(tokens, depuis) {
   const fic = feuille('Fichiers').getDataRange().getValues().slice(1).filter(r => t.has(r[1]))
     .map(r => ({ date: new Date(r[0]).toISOString(), token: r[1], categorie: r[2], nom: r[3], id: r[4], url: r[5], mime: r[6], taille: r[7], source: r[8], note: r[9] }));
   return { ok: true, reponses: rep, fichiers: fic, maintenant: new Date().toISOString() };
+}
+
+// ---------- devis à signer : lien court (le devis est stocké ici, le lien ne contient qu'un identifiant) ----------
+function documents() {
+  const ss = SpreadsheetApp.openById(PROP.getProperty('SHEET_ID'));
+  return ss.getSheetByName('Documents') || (() => { const f = ss.insertSheet('Documents'); f.appendRow(['Date', 'ID', 'Type', 'Client', 'Contenu', 'Signature', 'Signé le']); return f; })();
+}
+function trouverDoc(id) {
+  if (!/^[A-Za-z0-9]{8,24}$/.test(id)) throw new Error('lien invalide');
+  const f = documents(), v = f.getDataRange().getValues();
+  for (let i = 1; i < v.length; i++) if (v[i][1] === id) return { f, ligne: i + 1, r: v[i] };
+  throw new Error('devis introuvable');
+}
+function stocker(p) {
+  if (!p.contenu) throw new Error('contenu vide');
+  const alpha = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789';
+  let id = ''; for (let i = 0; i < 10; i++) id += alpha[Math.floor(Math.random() * alpha.length)];
+  documents().appendRow([new Date(), id, p.type || 'devis', p.client || '', p.contenu, '', '']);
+  return { ok: true, id };
+}
+function lireDoc(id) { const d = trouverDoc(id); return { ok: true, contenu: d.r[4], sig: d.r[5] ? JSON.parse(d.r[5]) : null }; }
+function signerDoc(id, sig) {
+  const d = trouverDoc(id);
+  if (d.r[5]) return { ok: true, deja: true }; // la première signature fait foi
+  if (!sig || !sig.nom || !sig.traits) throw new Error('signature incomplète');
+  d.f.getRange(d.ligne, 6, 1, 2).setValues([[JSON.stringify({ nom: String(sig.nom).slice(0, 120), traits: sig.traits, quand: sig.quand || new Date().toISOString() }), new Date()]]);
+  return { ok: true };
+}
+function signatures(ids) {
+  const t = new Set(ids);
+  const v = documents().getDataRange().getValues().slice(1).filter(r => t.has(r[1]) && r[5]);
+  return { ok: true, signatures: v.map(r => ({ id: r[1], contenu: r[4], sig: JSON.parse(r[5]) })) };
 }
