@@ -35,7 +35,8 @@ function router(p) {
     const admin = p.key && p.key === PROP.getProperty('ADMIN_KEY');
     switch (p.action) {
       case 'ping': return { ok: true, admin: !!admin };
-      case 'register': exiger(admin); enregistrerClient(p.token, p.client); return { ok: true };
+      case 'register': exiger(admin); enregistrerClient(p.token, p.client, p.vendeur); return { ok: true };
+      case 'infoPortail': return infoPortail(String(p.token || ''));
       case 'submit': exigerJeton(p.token); feuille('Reponses').appendRow([new Date(), p.token, p.client || '', JSON.stringify(p.data || {})]); return { ok: true, date: new Date().toISOString() };
       case 'upload': return televerser(p, admin);
       case 'pull': exiger(admin); return tirer(String(p.tokens || '').split(',').filter(String), p.depuis || '');
@@ -52,7 +53,19 @@ function exiger(c) { if (!c) throw new Error('clé d\'administration invalide');
 function feuille(nom) { return SpreadsheetApp.openById(PROP.getProperty('SHEET_ID')).getSheetByName(nom); }
 function jetons() { return feuille('Clients').getDataRange().getValues().slice(1).reduce((m, r) => { m[r[1]] = r[2]; return m; }, {}); }
 function exigerJeton(t) { if (!t || !jetons()[t]) throw new Error('lien de portail invalide ou expiré'); }
-function enregistrerClient(t, client) { if (!t || t.length < 16) throw new Error('jeton invalide'); if (!jetons()[t]) feuille('Clients').appendRow([new Date(), t, client || '']); }
+function enregistrerClient(t, client, vendeur) {
+  if (!t || t.length < 16) throw new Error('jeton invalide');
+  const f = feuille('Clients'), v = f.getDataRange().getValues(), info = JSON.stringify(vendeur || {});
+  for (let i = 1; i < v.length; i++) if (v[i][1] === t) { f.getRange(i + 1, 3, 1, 2).setValues([[client || v[i][2], info]]); return; }
+  f.appendRow([new Date(), t, client || '', info]);
+}
+// lien court de l'espace client (#p=jeton) : nom du client et coordonnées du prestataire, rien d'autre
+function infoPortail(t) {
+  const r = feuille('Clients').getDataRange().getValues().slice(1).find(x => x[1] === t);
+  if (!r) throw new Error('lien de portail invalide ou expiré');
+  let v = {}; try { v = JSON.parse(r[3] || '{}'); } catch (e) {}
+  return { ok: true, client: r[2], vendeur: v.nom || '', tel: v.tel || '' };
+}
 
 function dossier(token, categorie) {
   const racine = DriveApp.getFolderById(PROP.getProperty('FOLDER_ID'));
