@@ -1116,7 +1116,7 @@ function Devis({ s, d, numero, onBack, toast, dateFixe, barre, bandeau, signatur
     if (DOSSIER_COURANT) { const r = await assurerJeton(DOSSIER_COURANT); if (r.ok) portail = lienPortail(lireJSON(DK(DOSSIER_COURANT))); }
     const payload = LZString.compressToEncodedURIComponent(JSON.stringify({ ...snapDevis(s, d, numero), portail }));
     const empreinte = await empreinteDe(payload);
-    let lien = `${location.origin}${location.pathname}#signer=${payload}`, docId = '';
+    let lien = `${BASE_CLIENT}#signer=${payload}`, docId = '';
     if (!conf.url || conf.cle) { const r = await appelPortail(conf.url, { action: 'stocker', key: conf.cle, contenu: payload, client: cl.entreprise || '', type: 'devis' }); if (r.ok) { docId = r.id; lien = lienCourt(r.id, conf.url); } }
     setEnvoi({ lien, empreinte, court: !!docId, portail: !!portail });
     onEnvoi && onEnvoi(numero, empreinte, docId);
@@ -1488,7 +1488,7 @@ function PageSignature({ hash, doc }) {
   const signer = async (x) => { const full = { ...x, empreinte }; setSig(full); setDansCrm(enregistrerSignature(snap, { ...full, payload })); window.scrollTo(0, 0); document.getElementById('proposal-overlay').scrollTo(0, 0);
     if (doc) { const r = await appelPortail(doc.url, { action: 'signer', id: doc.id, sig: { nom: x.nom, traits: x.traits, quand: x.quand } }); setTransmis(!!r.ok); if (!r.ok) toast('Transmission impossible : ' + r.erreur + '. Renvoyez le devis signé avec les boutons ci-dessous.'); } };
   const espace = snap && snap.portail;
-  const lienRetour = sig && `${location.origin}${location.pathname}#signe=${payload}.${LZString.compressToEncodedURIComponent(JSON.stringify({ nom: sig.nom, traits: sig.traits, quand: sig.quand }))}`;
+  const lienRetour = sig && `${BASE_CRM}#signe=${payload}.${LZString.compressToEncodedURIComponent(JSON.stringify({ nom: sig.nom, traits: sig.traits, quand: sig.quand }))}`;
   const texteRetour = sig && [`Bonjour${v.nom ? ' ' + v.nom.split(' ')[0] : ''},`, '', `Voici le devis N° ${snap.numero} signé par ${sig.nom}${cl.entreprise ? ' (' + cl.entreprise + ')' : ''} :`, lienRetour].join('\n');
   const btn = 'rounded-xl px-4 py-2 text-sm font-semibold';
   const barre = (
@@ -1532,10 +1532,24 @@ function PageSignature({ hash, doc }) {
   );
 }
 
+if (MODE_CLIENT) document.title = 'Espace client';
+
+function PageEspaceNeutre() {
+  return <div className="grid min-h-screen place-items-center bg-gray-50 px-6 text-center"><div className="max-w-sm">
+    <p className="font-display text-2xl font-bold">Espace client</p>
+    <p className="mt-2 text-gray-600">Pour accéder à votre espace ou à votre devis, ouvrez le lien personnel que vous avez reçu par WhatsApp ou par email.</p></div></div>;
+}
+
 function Racine() {
   const [hash, setHash] = useState(location.hash);
   useEffect(() => { const f = () => setHash(location.hash); window.addEventListener('hashchange', f); return () => window.removeEventListener('hashchange', f); }, []);
-  const [crm] = useState(() => (hash.startsWith('#signer=') || hash.startsWith('#signe=') || hash.startsWith('#portail=') || hash.startsWith('#s=') || hash.startsWith('#p=') ? null : initCRM()));
+  const routeClient = /^#(signer=|s=|p=|portail=)/.test(hash);
+  // appareil d'un client (aucune donnée CRM) : jamais d'accès à l'interface du CRM
+  const [verrou] = useState(() => { const vide = !lireJSON(IDX) && !lireJSON(STORE);
+    if (vide && (MODE_CLIENT || routeClient)) { try { localStorage.setItem(DRAPEAU_CLIENT, '1'); } catch {} }
+    return MODE_CLIENT || (vide && !!localStorage.getItem(DRAPEAU_CLIENT)); });
+  const [crm] = useState(() => (verrou || hash.startsWith('#signer=') || hash.startsWith('#signe=') || hash.startsWith('#portail=') || hash.startsWith('#s=') || hash.startsWith('#p=') ? null : initCRM()));
+  if (verrou && !routeClient) return <PageEspaceNeutre />;
   if (hash.startsWith('#portail=')) return <PagePortail hash={hash} />;
   if (hash.startsWith('#p=')) return <PagePortailCourt key={hash} hash={hash} />;
   if (hash.startsWith('#s=')) return <PageDevisCourt key={hash} hash={hash} />;
@@ -3452,9 +3466,14 @@ const lireFichier = (f) => new Promise((ok, ko) => { const r = new FileReader();
 // ---------- configuration et transport ----------
 const confPortail = () => ({ url: '', cle: '', ...(((lireJSON(IDX) || {}).portail) || {}) });
 const LOCAL_SRV = 'crm-portail-local';
+// Espace client séparé du CRM : les liens envoyés aux clients ouvrent espace.html, qui n'affiche QUE le formulaire ou le devis
+const MODE_CLIENT = /espace\.html$/.test(location.pathname);
+const DOSSIER_SITE = location.origin + location.pathname.replace(/[^/]*$/, '');
+const BASE_CLIENT = DOSSIER_SITE + 'espace.html', BASE_CRM = DOSSIER_SITE;
+const DRAPEAU_CLIENT = 'appareil-client'; // cet appareil a ouvert un lien client et n'a aucune donnée CRM
 // adresse publique du script Google de Hafid : permet des liens courts (#s=identifiant) lisibles sur le téléphone du client
 const PORTAIL_URL_DEFAUT = 'https://script.google.com/macros/s/AKfycbwN5bVeW9z9gr5F7S_GrMMP6b2srI-7pqQ1icUW4we6JQtRbdLVWSHHAtYWIEnwcel5/exec';
-const lienCourt = (id, url) => `${location.origin}${location.pathname}#s=${id}${!url ? '&u=local' : url !== PORTAIL_URL_DEFAUT ? '&u=' + encodeURIComponent(url) : ''}`; // mode démonstration : le « serveur » est ce navigateur
+const lienCourt = (id, url) => `${BASE_CLIENT}#s=${id}${!url ? '&u=local' : url !== PORTAIL_URL_DEFAUT ? '&u=' + encodeURIComponent(url) : ''}`; // mode démonstration : le « serveur » est ce navigateur
 function serveurLocal(p) {
   const s = { clients: {}, reponses: [], fichiers: [], ...(lireJSON(LOCAL_SRV) || {}) }, now = new Date().toISOString();
   const ok = (o) => { ecrireJSON(LOCAL_SRV, s); return { ok: true, ...o }; };
@@ -3493,7 +3512,7 @@ async function envoyerFichier(url, token, client, fichier, categorie, note, key)
 }
 // lien de l'espace client : court (#p=jeton), les infos d'affichage sont lues dans Google
 const lienPortail = (st) => { const c = st.collecte || {}, conf = confPortail();
-  return `${location.origin}${location.pathname}#p=${c.token}${!conf.url ? '&u=local' : conf.url !== PORTAIL_URL_DEFAUT ? '&u=' + encodeURIComponent(conf.url) : ''}`; };
+  return `${BASE_CLIENT}#p=${c.token}${!conf.url ? '&u=local' : conf.url !== PORTAIL_URL_DEFAUT ? '&u=' + encodeURIComponent(conf.url) : ''}`; };
 async function assurerJeton(id) {
   const st = lireJSON(DK(id)); const c = st.collecte || {};
   const conf = confPortail();
